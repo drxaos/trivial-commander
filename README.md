@@ -1,4 +1,7 @@
-# TCM (Trivial Commander) — a two-panel file manager
+# Trivial Commander — a two-panel file manager
+
+<img width="1200" height="787" alt="image" src="https://github.com/user-attachments/assets/65b04047-124b-4475-968a-e69ed1192976" />
+
 
 ## Running
 
