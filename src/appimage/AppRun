@@ -1,0 +1,4 @@
+#!/bin/sh
+# The native image looks up the JDK libraries (lib*.so) next to the executable
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/tcm" "$@"

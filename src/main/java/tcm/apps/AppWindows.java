@@ -3,6 +3,7 @@ package tcm.apps;
 import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Frame;
+import java.awt.Image;
 import java.awt.GraphicsDevice;
 import java.awt.Window;
 import java.awt.event.WindowAdapter;
@@ -10,6 +11,7 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Consumer;
 
 import javax.swing.JCheckBoxMenuItem;
@@ -35,12 +37,28 @@ public final class AppWindows {
 
     /** Help (F1, Help menu) lives in ui, which apps does not depend on — the main window supplies it. */
     private static @Nullable Consumer<Window> helpHandler;
+    /** Window icons as of a text file and of an image in the panel; drawn in ui and also supplied by the main window. */
+    private static List<Image> textIcons = List.of();
+    private static List<Image> imageIcons = List.of();
 
     private AppWindows() {
     }
 
     public static void setHelpHandler(final @NotNull Consumer<Window> handler) {
         helpHandler = handler;
+    }
+
+    public static void setIcons(final @NotNull List<Image> text, final @NotNull List<Image> image) {
+        textIcons = List.copyOf(text);
+        imageIcons = List.copyOf(image);
+    }
+
+    /** Viewer and editor: the icon of the file type being shown — text or image. */
+    static void setFileIcon(final @NotNull Window w, final boolean image) {
+        final List<Image> icons = image ? imageIcons : textIcons;
+        if (!icons.isEmpty()) {
+            w.setIconImages(icons);
+        }
     }
 
     static void showHelp(final @NotNull Window w) {

@@ -75,11 +75,12 @@ public final class VFile {
         final @NotNull String entry,
         final boolean directory,
         final long size,
-        final long modified
+        final long modified,
+        final @NotNull String attrs
     ) {
         final String name = entry.isEmpty() ? String.valueOf(archive.getFileName()) : entry.substring(entry.lastIndexOf('/') + 1);
 
-        return new VFile(null, archive, entry, name, directory, size, modified, "", false, false);
+        return new VFile(null, archive, entry, name, directory, size, modified, attrs, false, false);
     }
 
     public static @NotNull VFile parentLink(final @NotNull VFile target) {

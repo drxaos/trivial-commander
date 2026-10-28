@@ -41,7 +41,7 @@ public final class TarArchives {
         final Map<String, TarArchiveEntry> byName = new HashMap<>();
         for (final TarArchiveEntry e : tar.getEntries()) {
             final boolean dir = e.isDirectory();
-            index.add(e.getName(), dir, e.isFile() ? e.getSize() : 0, e.getModTime().getTime());
+            index.add(e.getName(), dir, e.isFile() ? e.getSize() : 0, e.getModTime().getTime(), FileAttrs.posix(e.getMode()));
             if (!dir) {
                 byName.put(ArchiveIndex.entryName(e.getName()), e);
             }

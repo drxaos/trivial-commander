@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import tcm.core.ArchiveIndex;
 import tcm.core.ArchiveReader;
+import tcm.core.FileAttrs;
 import tcm.core.Progress;
 import tcm.core.Streams;
 import tcm.core.Trash;
@@ -171,6 +172,9 @@ public final class CopyJob extends Job {
             Streams.copy(in, out, ctx);
         }
         Files.setLastModifiedTime(dst, FileTime.fromMillis(src.getModified()));
+        if (src.isInArchive()) {
+            FileAttrs.apply(dst, src.getAttrs());
+        }
         if (move) {
             movedFiles.add(src);
         }
@@ -195,6 +199,10 @@ public final class CopyJob extends Job {
             copyToLocal(child, dst, child.getName(), ctx);
         }
         Files.setLastModifiedTime(dst, FileTime.fromMillis(src.getModified()));
+        // after the contents: a directory without write permission would not accept them
+        if (src.isInArchive()) {
+            FileAttrs.apply(dst, src.getAttrs());
+        }
         if (move) {
             movedDirs.add(src);
         }

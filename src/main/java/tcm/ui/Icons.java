@@ -5,10 +5,14 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.geom.Arc2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
+import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 import javax.swing.Icon;
@@ -68,6 +72,21 @@ public final class Icons {
         }
 
         return file.isImage() ? IMAGE : FILE;
+    }
+
+    /** Window icon in several sizes: the window manager picks the one it needs (title bar, taskbar, Alt+Tab). */
+    public static @NotNull List<Image> windowImages(final @NotNull Icon icon) {
+        final List<Image> images = new ArrayList<>();
+        for (final int size : new int[] {16, 24, 32, 48, 64}) {
+            final BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+            final Graphics2D g = img.createGraphics();
+            g.scale((double) size / icon.getIconWidth(), (double) size / icon.getIconHeight());
+            icon.paintIcon(null, g, 0, 0);
+            g.dispose();
+            images.add(img);
+        }
+
+        return images;
     }
 
     private static final class Painted implements Icon {

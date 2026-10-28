@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -71,6 +72,8 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     private final AtomicInteger generation = new AtomicInteger();
     @Getter
     private @NotNull VFile dir;
+    /** Temporary copies of nested archives this tab is inside of (see Vfs.openNested). */
+    private final List<Path> nested = new ArrayList<>();
     /** Not null — the tab shows search results or a flat listing (Ctrl+B). */
     private @Nullable List<VFile> feed;
     private @NotNull String feedTitle = "";
@@ -148,6 +151,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         table.stopRename();
         dir = target;
         feed = null;
+        syncNested();
         model.setFiles(visible, false);
         if (record) {
             record(target.getLocation());
@@ -157,6 +161,32 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         updateLabels();
 
         return true;
+    }
+
+    /** Holds the nested archives of the current directory and releases those the tab has left. */
+    private void syncNested() {
+        final List<Path> chain = Vfs.nestedChain(dir);
+        for (final Path p : chain) {
+            if (!nested.contains(p)) {
+                Vfs.retainNested(p);
+                nested.add(p);
+            }
+        }
+        for (final Iterator<Path> it = nested.iterator(); it.hasNext(); ) {
+            final Path p = it.next();
+            if (!chain.contains(p)) {
+                it.remove();
+                Vfs.releaseNested(p);
+            }
+        }
+    }
+
+    /** The tab is closed: its nested archives are no longer needed. */
+    public void dispose() {
+        for (final Path p : nested) {
+            Vfs.releaseNested(p);
+        }
+        nested.clear();
     }
 
     public boolean navigate(final @NotNull String location) {
@@ -487,7 +517,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
             return;
         }
-        if (f.isArchiveFile() && f.isLocal()) {
+        if (f.isArchiveFile()) {
             openArchive(f);
 
             return;
@@ -503,6 +533,9 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             if (f.isLocal() && ArchiveFormat.detect(f.getHostPath()) != null) {
                 openArchive(f);
 
+                return;
+            }
+            if (f.isInArchive() && openNested(f)) {
                 return;
             }
         } catch (final IOException e) {
@@ -521,20 +554,39 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
             return;
         }
-        if (!f.isLocal()) {
-            showError("Archives inside archives are not supported: " + f.getName(), null);
-
-            return;
-        }
         openArchive(f);
     }
 
+    /** A file on disk or an archive inside an archive (unpacked into a temporary file while the tab is inside it). */
     public void openArchive(final @NotNull VFile f) {
         try {
-            navigate(Vfs.archiveDir(f.getHostPath(), ""), null, true);
+            if (f.isLocal()) {
+                navigate(Vfs.archiveDir(f.getHostPath(), ""), null, true);
+            } else if (!openNested(f)) {
+                showError("Not an archive or unsupported format: " + f.getName(), null);
+            }
         } catch (final IOException e) {
-            showError("Cannot open archive " + f.getLocation(), e);
+            showError("Cannot open archive " + Vfs.displayLocation(f), e);
         }
+    }
+
+    /** false — the entry is not an archive. */
+    private boolean openNested(final @NotNull VFile f) throws IOException {
+        final Path tmp = Vfs.openNested(f);
+        if (tmp == null) {
+            return false;
+        }
+        boolean opened = false;
+        try {
+            opened = navigate(Vfs.archiveDir(tmp, ""), null, true);
+        } finally {
+            if (!opened) {
+                // nobody holds the copy — it is deleted
+                Vfs.releaseNested(tmp);
+            }
+        }
+
+        return true;
     }
 
     public void selectName(final @NotNull String name) {
@@ -721,7 +773,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
     /** Local directory for external programs: for an archive — the directory where it resides. */
     public @NotNull Path getWorkingDirectory() {
-        final Path host = dir.getHostPath();
+        final Path host = Vfs.diskPath(dir);
         if (dir.isInArchive()) {
             final Path parent = host.getParent();
 
@@ -739,7 +791,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         final String mask = programsOnly ? "<programs>" : Masks.isAll(filter) ? "*" : filter;
         final String quick = quickFilter.isEmpty() ? "" : "  [filter: " + quickFilter + "]";
         final String sep = dir.isInArchive() ? (dir.getEntry().isEmpty() ? "" : "/") : (dir.getLocation().endsWith("/") ? "" : "/");
-        header.setText(feed != null ? feedTitle + " (" + feed.size() + ")" : dir.getLocation() + sep + mask + quick);
+        header.setText(feed != null ? feedTitle + " (" + feed.size() + ")" : Vfs.displayLocation(dir) + sep + mask + quick);
         status.setText(model.getSummary());
         owner.tabUpdated(this);
     }

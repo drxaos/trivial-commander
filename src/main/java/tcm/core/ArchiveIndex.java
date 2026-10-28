@@ -58,7 +58,7 @@ public final class ArchiveIndex {
         this.charset = charset;
         this.archiveModified = archiveModified;
         this.archiveSize = archiveSize;
-        entries.put("", VFile.archiveEntry(archive, "", true, 0, archiveModified));
+        entries.put("", VFile.archiveEntry(archive, "", true, 0, archiveModified, ""));
     }
 
     public static @NotNull ArchiveIndex load(final @NotNull Path archive) throws IOException {
@@ -133,11 +133,12 @@ public final class ArchiveIndex {
         final long size
     ) throws IOException {
         final ArchiveIndex index = new ArchiveIndex(archive, ArchiveFormat.ZIP, charset, modified, size);
+        final Map<String, String> attrs = ZipAttributes.read(archive, charset);
         try (ZipFile zip = new ZipFile(archive.toFile(), charset)) {
             final Enumeration<? extends ZipEntry> en = zip.entries();
             while (en.hasMoreElements()) {
                 final ZipEntry ze = en.nextElement();
-                index.add(ze.getName(), ze.isDirectory(), ze.getSize(), ze.getTime());
+                index.add(ze.getName(), ze.isDirectory(), ze.getSize(), ze.getTime(), attrs.getOrDefault(entryName(ze.getName()), ""));
             }
         }
 
@@ -240,8 +241,8 @@ public final class ArchiveIndex {
         this.tar = reader;
     }
 
-    /** Adds an entry by its raw name from the archive. */
-    void add(final @NotNull String rawName, final boolean directory, final long size, final long time) {
+    /** Adds an entry by its raw name from the archive; attrs — Attr column text (see FileAttrs), "" — unknown. */
+    void add(final @NotNull String rawName, final boolean directory, final long size, final long time, final @NotNull String attrs) {
         final String name = entryName(rawName);
         if (name.isEmpty()) {
             return;
@@ -249,9 +250,10 @@ public final class ArchiveIndex {
         final long t = time <= 0 ? archiveModified : time;
         ensureParents(name, t);
         if (!directory) {
-            put(VFile.archiveEntry(archive, name, false, Math.max(size, 0), t));
-        } else if (!entries.containsKey(name)) {
-            put(VFile.archiveEntry(archive, name, true, 0, t));
+            put(VFile.archiveEntry(archive, name, false, Math.max(size, 0), t, attrs));
+        } else if (!entries.containsKey(name) || !attrs.isEmpty()) {
+            // a directory already reconstructed from an earlier file path gets its own attributes and time
+            put(VFile.archiveEntry(archive, name, true, 0, t, attrs));
         }
     }
 
@@ -324,7 +326,7 @@ public final class ArchiveIndex {
             parent = parentOf(parent);
         }
         for (int i = missing.size() - 1; i >= 0; i--) {
-            put(VFile.archiveEntry(archive, missing.get(i), true, 0, time));
+            put(VFile.archiveEntry(archive, missing.get(i), true, 0, time, ""));
         }
     }
 

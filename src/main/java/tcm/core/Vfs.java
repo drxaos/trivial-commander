@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipFile;
 
 import org.jetbrains.annotations.NotNull;
@@ -36,6 +37,8 @@ public final class Vfs {
 
     private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     private static final Map<Path, ArchiveIndex> ARCHIVES = new ConcurrentHashMap<>();
+    /** Archives unpacked from other archives: temporary copy → the entry it came from. */
+    private static final Map<Path, Nested> NESTED = new ConcurrentHashMap<>();
 
     private Vfs() {
     }
@@ -102,8 +105,7 @@ public final class Vfs {
             return VFile.local(path, attrs.isDirectory(), attrs.size(), attrs.lastModifiedTime().toMillis(), perms, name.startsWith("."));
         }
         final DosFileAttributes attrs = readAttributes(path, DosFileAttributes.class);
-        final String flags = (attrs.isReadOnly() ? "r" : "-") + (attrs.isArchive() ? "a" : "-") + (attrs.isHidden() ? "h" : "-")
-            + (attrs.isSystem() ? "s" : "-");
+        final String flags = FileAttrs.dos(attrs.isReadOnly(), attrs.isArchive(), attrs.isHidden(), attrs.isSystem());
 
         return VFile.local(path, attrs.isDirectory(), attrs.size(), attrs.lastModifiedTime().toMillis(), flags, attrs.isHidden());
     }
@@ -130,6 +132,11 @@ public final class Vfs {
     public static @Nullable VFile parent(final @NotNull VFile file) throws IOException {
         if (file.isInArchive()) {
             if (file.getEntry().isEmpty()) {
+                final Nested nested = NESTED.get(file.getHostPath());
+                if (nested != null) {
+                    // from the root of a nested archive — into the directory of the outer archive where it lies
+                    return archiveDir(nested.origin.getHostPath(), ArchiveIndex.parentOf(nested.origin.getEntry()));
+                }
                 final Path parent = file.getHostPath().getParent();
 
                 return parent == null ? null : stat(parent);
@@ -192,6 +199,9 @@ public final class Vfs {
 
     /** Only ZIP/JAR can be modified; for other formats a write operation is rejected before it starts. */
     public static void checkWritable(final @NotNull Path archive) throws IOException {
+        if (NESTED.containsKey(archive.toAbsolutePath().normalize())) {
+            throw new IOException("Archive inside an archive is read-only: " + archive.getFileName());
+        }
         final ArchiveFormat format = Files.exists(archive) && Files.size(archive) > 0
             ? index(archive).getFormat()
             : ArchiveFormat.of(String.valueOf(archive.getFileName()));
@@ -220,6 +230,95 @@ public final class Vfs {
         final ArchiveIndex old = ARCHIVES.remove(archive.toAbsolutePath().normalize());
         if (old != null) {
             old.dispose();
+        }
+    }
+
+    /**
+     * Unpacks an archive lying inside another archive into a temporary file with the same name, to be opened as a directory.
+     * null — the entry is not an archive (the temporary copy is already deleted). The copy is deleted by the last
+     * {@link #releaseNested} after {@link #retainNested}.
+     */
+    public static @Nullable Path openNested(final @NotNull VFile entry) throws IOException {
+        final Path dir = Files.createTempDirectory("tcm-nested-");
+        final Path tmp = dir.resolve(entry.getName());
+        // deleteOnExit deletes in reverse order: the file first, then its directory
+        dir.toFile().deleteOnExit();
+        tmp.toFile().deleteOnExit();
+        try {
+            try (InputStream in = openInput(entry)) {
+                Files.copy(in, tmp);
+            }
+            if (ArchiveFormat.forFile(tmp) == null) {
+                deleteNested(tmp);
+
+                return null;
+            }
+        } catch (final IOException | RuntimeException e) {
+            deleteNested(tmp);
+            throw e;
+        }
+        NESTED.put(tmp, new Nested(entry));
+
+        return tmp;
+    }
+
+    /** One more panel shows the nested archive. */
+    public static void retainNested(final @NotNull Path archive) {
+        final Nested nested = NESTED.get(archive);
+        if (nested != null) {
+            nested.refs.incrementAndGet();
+        }
+    }
+
+    /** The panel left the nested archive; when nobody else shows it, the temporary copy is deleted. */
+    public static void releaseNested(final @NotNull Path archive) {
+        final Nested nested = NESTED.get(archive);
+        if (nested != null && nested.refs.decrementAndGet() <= 0) {
+            NESTED.remove(archive);
+            invalidate(archive);
+            deleteNested(archive);
+        }
+    }
+
+    /** Temporary copies of the nested archives the location is inside of, from the innermost outwards. */
+    public static @NotNull List<Path> nestedChain(final @NotNull VFile file) {
+        final List<Path> chain = new ArrayList<>();
+        Path host = file.isInArchive() ? file.getHostPath() : null;
+        while (host != null) {
+            final Nested nested = NESTED.get(host);
+            if (nested == null) {
+                break;
+            }
+            chain.add(host);
+            host = nested.origin.getHostPath();
+        }
+
+        return chain;
+    }
+
+    /** Path for display: a nested archive is shown inside the outer one ("a.zip!/b.tar!/dir") instead of its temporary copy. */
+    public static @NotNull String displayLocation(final @NotNull VFile file) {
+        final Nested nested = file.isInArchive() ? NESTED.get(file.getHostPath()) : null;
+        if (nested == null) {
+            return file.getLocation();
+        }
+
+        return displayLocation(nested.origin) + VFile.ARCHIVE_SEPARATOR + file.getEntry();
+    }
+
+    /** A real file on disk: for a nested archive — the outermost archive it was unpacked from. */
+    public static @NotNull Path diskPath(final @NotNull VFile file) {
+        final List<Path> chain = nestedChain(file);
+
+        return chain.isEmpty() ? file.getHostPath() : NESTED.get(chain.get(chain.size() - 1)).origin.getHostPath();
+    }
+
+    private static void deleteNested(final @NotNull Path tmp) {
+        try {
+            Files.deleteIfExists(tmp);
+            Files.deleteIfExists(tmp.getParent());
+        } catch (final IOException e) {
+            // left to deleteOnExit
         }
     }
 
@@ -295,6 +394,16 @@ public final class Vfs {
                 + TextUtil.groupDigits(store.getTotalSpace() / 1024) + " k free";
         } catch (final IOException e) {
             return "";
+        }
+    }
+
+    private static final class Nested {
+
+        private final @NotNull VFile origin;
+        private final AtomicInteger refs = new AtomicInteger();
+
+        private Nested(final @NotNull VFile origin) {
+            this.origin = origin;
         }
     }
 

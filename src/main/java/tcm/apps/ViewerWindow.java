@@ -74,6 +74,7 @@ public final class ViewerWindow {
 
     private void show() {
         final VFile f = files.get(index);
+        AppWindows.setFileIcon(window, f.isImage());
         AppWindows.setTitle(window, "Viewer - [" + f.getLocation() + "]" + (files.size() > 1 ? "  (" + (index + 1) + "/" + files.size() + ")" : ""));
         viewer.load(f);
     }

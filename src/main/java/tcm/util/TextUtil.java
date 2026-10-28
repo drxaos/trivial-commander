@@ -23,6 +23,7 @@ public final class TextUtil {
     private static final byte[] BOM_UTF16_BE = {(byte) 0xFE, (byte) 0xFF};
     private static final byte[] BOM_UTF16_LE = {(byte) 0xFF, (byte) 0xFE};
     private static final String DATE_PATTERN = "dd.MM.yyyy HH:mm";
+    private static final int BINARY_SAMPLE = 8192;
 
     private TextUtil() {
     }
@@ -75,19 +76,27 @@ public final class TextUtil {
         return result;
     }
 
-    /** "This is a binary file" heuristic: zero bytes at the beginning. */
+    /**
+     * "This is a binary file" heuristic over the first 8 KB: a zero byte, or more than one control character in ten
+     * (tab, line breaks, form feed, backspace, ESC of ANSI colors and the DOS end-of-file mark do not count).
+     */
     public static boolean looksBinary(final byte @NotNull [] data) {
-        if (startsWith(data, BOM_UTF16_BE) || startsWith(data, BOM_UTF16_LE)) {
+        if (startsWith(data, BOM_UTF8) || startsWith(data, BOM_UTF16_BE) || startsWith(data, BOM_UTF16_LE)) {
             return false;
         }
-        final int limit = Math.min(data.length, 8192);
+        final int limit = Math.min(data.length, BINARY_SAMPLE);
+        int controls = 0;
         for (int i = 0; i < limit; i++) {
-            if (data[i] == 0) {
+            final int b = data[i];
+            if (b == 0) {
                 return true;
+            }
+            if (b > 0 && b < 32 && b != '\t' && b != '\n' && b != '\r' && b != '\f' && b != '\b' && b != 27 && b != 26) {
+                controls++;
             }
         }
 
-        return false;
+        return controls * 10 > limit;
     }
 
     public static @NotNull String groupDigits(final long value) {

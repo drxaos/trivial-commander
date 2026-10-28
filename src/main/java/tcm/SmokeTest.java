@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -16,6 +18,8 @@ import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream;
@@ -51,6 +55,8 @@ public final class SmokeTest {
 
     private static final String RAR5 = "UmFyIRoHAQDz4YLrCwEFBwAGAQGAgIAA1tMf2iUCAwufAATgErSDAvz+XuiABQEHZC94LnR4dAoDEwKO3Gr6Vtsf"
         + "wYccMwI/sy/yKy100PQkIP9QHl6rqfPfRgMy0XtdwNGdPsgRAgIAAwD9gwElfZNlgAABAWQdd1ZRAwUEAA==";
+
+    private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     private static int checks;
 
@@ -158,6 +164,8 @@ public final class SmokeTest {
 
         checkSearch(root, src, zip);
         checkReadOnlyArchives(root);
+        checkArchiveAttributes(root);
+        checkNestedArchives(root);
         checkWatcher(root);
         checkUtils();
     }
@@ -195,6 +203,9 @@ public final class SmokeTest {
             final Path out = Files.createDirectories(root.resolve("untar-" + name));
             exec(new UnpackJob(List.of(Vfs.stat(tar)), Vfs.resolve(out.toString()), "*"));
             check(Files.readString(out.resolve("d/x.txt")).equals(text) && Files.isDirectory(out.resolve("d/empty")), "unpack " + name);
+            check(Vfs.file(tar + "!/d/x.txt").getAttrs().equals("rwxr-x---"), "tar attributes " + name);
+            check(!POSIX || Files.getPosixFilePermissions(out.resolve("d/x.txt")).equals(PosixFilePermissions.fromString("rwxr-x---")),
+                "unpack keeps tar permissions " + name);
             final TestJob test = new TestJob(List.of(Vfs.stat(tar)));
             exec(test);
             check(test.getReport().get(0).startsWith("OK"), "test " + name);
@@ -216,6 +227,7 @@ public final class SmokeTest {
         final Path unrar = Files.createDirectories(root.resolve("unrar"));
         exec(new UnpackJob(List.of(Vfs.stat(rar)), Vfs.resolve(unrar.toString()), "*"));
         check(Files.readString(unrar.resolve("d/x.txt")).equals("rar content\n".repeat(200)), "unpack rar");
+        check(!Vfs.file(rar + "!/d/x.txt").getAttrs().isEmpty(), "rar attributes");
         final TestJob rarTest = new TestJob(List.of(Vfs.stat(rar)));
         exec(rarTest);
         check(rarTest.getReport().get(0).startsWith("OK"), "test rar");
@@ -233,6 +245,68 @@ public final class SmokeTest {
         // names without the UTF-8 flag: Russian DOS/Windows archives write them in CP866, Western ones in CP437
         checkDosNames(root, "dos866.zip", "IBM866", "Документы/Отчёт.txt");
         checkDosNames(root, "dos437.zip", "IBM437", "Müller/Straße.txt");
+    }
+
+    /** Unix permissions and DOS flags of ZIP entries: shown in the Attr column and set on unpacking. */
+    private static void checkArchiveAttributes(final @NotNull Path root) throws Exception {
+        final Path zip = root.resolve("attrs.zip");
+        try (ZipArchiveOutputStream z = new ZipArchiveOutputStream(zip)) {
+            final ZipArchiveEntry unix = new ZipArchiveEntry("unix.sh");
+            unix.setUnixMode(0100640);
+            z.putArchiveEntry(unix);
+            z.write('u');
+            z.closeArchiveEntry();
+            final ZipArchiveEntry dos = new ZipArchiveEntry("dos.txt");
+            // read-only + archive
+            dos.setExternalAttributes(0x21);
+            z.putArchiveEntry(dos);
+            z.write('d');
+            z.closeArchiveEntry();
+        }
+        check(Vfs.file(zip + "!/unix.sh").getAttrs().equals("rw-r-----"), "zip unix attributes: " + Vfs.file(zip + "!/unix.sh").getAttrs());
+        check(Vfs.file(zip + "!/dos.txt").getAttrs().equals("ra--"), "zip dos attributes: " + Vfs.file(zip + "!/dos.txt").getAttrs());
+        final Path out = Files.createDirectories(root.resolve("attrs.out"));
+        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(out.toString()), "*"));
+        if (POSIX) {
+            check(Files.getPosixFilePermissions(out.resolve("unix.sh")).equals(PosixFilePermissions.fromString("rw-r-----")),
+                "unpack keeps zip permissions");
+            check(!Files.isWritable(out.resolve("dos.txt")), "unpack keeps zip read-only flag");
+            // otherwise the temporary directory is not deleted on Windows; on Unix the directory permissions decide
+            Files.setPosixFilePermissions(out.resolve("dos.txt"), PosixFilePermissions.fromString("rw-r--r--"));
+        }
+    }
+
+    /** An archive inside an archive is unpacked into a temporary file, opened read-only and deleted with the last release. */
+    private static void checkNestedArchives(final @NotNull Path root) throws Exception {
+        final Path inner = root.resolve("inner.zip");
+        try (ZipOutputStream z = new ZipOutputStream(Files.newOutputStream(inner))) {
+            z.putNextEntry(new ZipEntry("d/n.txt"));
+            z.write("nested".getBytes(StandardCharsets.UTF_8));
+            z.closeEntry();
+        }
+        final Path outer = root.resolve("outer.zip");
+        try (ZipOutputStream z = new ZipOutputStream(Files.newOutputStream(outer))) {
+            z.putNextEntry(new ZipEntry("sub/inner.zip"));
+            z.write(Files.readAllBytes(inner));
+            z.closeEntry();
+            z.putNextEntry(new ZipEntry("plain.txt"));
+            z.write('p');
+            z.closeEntry();
+        }
+        final Path tmp = Vfs.openNested(Vfs.file(outer + "!/sub/inner.zip"));
+        check(tmp != null && names(Vfs.archiveDir(tmp, "")).equals(List.of("d")), "nested archive listing");
+        check(new String(Vfs.readAll(Vfs.file(tmp + "!/d/n.txt")), StandardCharsets.UTF_8).equals("nested"), "nested archive read");
+        check(Vfs.displayLocation(Vfs.archiveDir(tmp, "d")).equals(outer + "!/sub/inner.zip!/d"), "nested display location");
+        check(Vfs.archiveDir(outer, "sub").equals(Vfs.parent(Vfs.archiveDir(tmp, ""))), "nested parent is the outer directory");
+        check(Vfs.diskPath(Vfs.archiveDir(tmp, "d")).equals(outer), "nested disk path");
+        check(failsWithIo(() -> exec(new CopyJob(List.of(Vfs.stat(inner)), Vfs.archiveDir(tmp, "d"), null, "*", false))), "nested is read-only");
+        Vfs.retainNested(tmp);
+        Vfs.retainNested(tmp);
+        Vfs.releaseNested(tmp);
+        check(Files.exists(tmp), "nested kept while retained");
+        Vfs.releaseNested(tmp);
+        check(!Files.exists(tmp) && !Files.exists(tmp.getParent()), "nested temporary file deleted");
+        check(Vfs.openNested(Vfs.file(outer + "!/plain.txt")) == null, "non-archive entry is not opened as nested");
     }
 
     private static void checkDosNames(
@@ -265,6 +339,7 @@ public final class SmokeTest {
             final byte[] data = text.getBytes(StandardCharsets.UTF_8);
             final TarArchiveEntry e = new TarArchiveEntry("./d/x.txt");
             e.setSize(data.length);
+            e.setMode(0100750);
             tar.putArchiveEntry(e);
             tar.write(data);
             tar.closeArchiveEntry();

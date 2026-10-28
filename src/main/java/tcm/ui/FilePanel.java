@@ -199,6 +199,7 @@ public final class FilePanel extends JPanel {
         if (tabs.getTabCount() <= 1 || index < 0) {
             return;
         }
+        ((PanelTab) tabs.getComponentAt(index)).dispose();
         tabs.removeTabAt(index);
         getCurrentTab().focusTable();
     }
@@ -212,6 +213,7 @@ public final class FilePanel extends JPanel {
         final PanelTab keep = getCurrentTab();
         for (int i = tabs.getTabCount() - 1; i >= 0; i--) {
             if (tabs.getComponentAt(i) != keep) {
+                ((PanelTab) tabs.getComponentAt(i)).dispose();
                 tabs.removeTabAt(i);
             }
         }

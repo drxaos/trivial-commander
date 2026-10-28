@@ -19,6 +19,9 @@ GRAALVM_HOME=../graalvm-25.4.4.1.1 mvn -Pnative package   # ~3 min, target/tcm +
 target/tcm
 ```
 
+Also packs `target/tcm-1.0.0-linux-amd64.tar.xz` and `target/tcm-1.0.0-linux-amd64.AppImage`
+(the AppImage needs `mksquashfs` from squashfs-tools; the AppImage runtime is downloaded once into `~/.cache/appimage`).
+
 ## Features
 
 - **Two panels** with a Name / Ext / Size / Date / Attr table, sorting by clicking the header or `Ctrl+F3..F7`,
@@ -45,10 +48,14 @@ target/tcm
   (as in TC). `Ctrl+PgDn` opens any file as an archive: the format is detected by signature (`.docx`, `.apk`, `.cbr`...).
   `Enter`/double click on a file without an associated program does the same.
   Entry names with `..` are trimmed, so unpacking cannot escape the target directory.
+- **Archive attributes**: Unix permissions (`rwxr-xr-x`) or DOS flags (`rahs`) stored in ZIP, TAR and RAR are shown in the Attr
+  column and set on unpacked files (Unix permissions on Windows and DOS flags on Unix — only "read-only").
+- **Archives inside archives** open with Enter/`Ctrl+PgDn` as well (read only): the nested archive is unpacked into a temporary file,
+  the path is shown as `outer.zip!/dir/inner.tar.gz!/...`, and the temporary file is deleted when the tab leaves the archive or is closed.
 - **Search** (`Alt+F7`): name mask or RegEx, text (substring/RegEx, case, "NOT containing"), depth, archives,
   size/date/type on the Advanced tab, search in results (`F2`), result history (`Alt+←/→`); "Feed to listbox", "Go to file".
   Flat list of subdirectories — `Ctrl+B`.
-- **Viewer** (`F3`): text (UTF-8/BOM, fallback ISO-8859-1; `A`/`S` — 1251/866), binary, hex, HTML;
+- **Viewer** (`F3`; on a directory `F3` enters it, as Enter does): text (UTF-8/BOM, fallback ISO-8859-1; `A`/`S` — 1251/866), binary, hex, HTML;
   search `F7`/`F3`, switching between files `N`/`P`. Quick view `Ctrl+Q` (in the other panel) and `Ctrl+Shift+Q` (window).
   Menus as in TC: File (Save as, Reload `F2`, Close), Edit (Copy, Select all, Find `F7`, Find next `F5`),
   Options (modes `1`–`7`, Markdown `8`, JSON `9`, ANSI `A`, ASCII `S`, other encoding, proportional font `V`, wrap `W`,
@@ -60,7 +67,10 @@ target/tcm
   The mouse wheel rolled with the wheel pressed scrolls 5 times more lines.
   Reading and converting the file (decoding, hex, markup) runs in the background: the main window does not wait, and a closed viewer
   (and editor) window cancels loading.
-  Lines longer than 10000 characters are wrapped in text modes: otherwise a single multi-megabyte line would lock up the window for a long time.
+  Line numbers on the left; a click on a number selects the whole line, dragging — several lines, `Shift`+click extends the selection.
+  Lines wider than ~24000 px (about 3000 characters at the normal font size) are cut into pieces in text modes, a piece has no
+  line number of its own: with XRender on Linux glyphs further than 32767 px from the line start are drawn over its beginning,
+  and a single multi-megabyte line would lock up the window for a long time.
 - **Images** in the Viewer:
   - mouse wheel — zoom around the point under the cursor; left-button drag — scroll;
   - `←`/`→` — neighboring image in the directory;
@@ -86,7 +96,8 @@ target/tcm
   Alt+Shift (Ctrl+Shift) shortcuts work even when the layout is switched with these keys (XKB `grp:alt_shift_toggle`):
   the modifier eaten by the switch is restored from the presses of the keys themselves (`LayoutSwitchKeys`).
 - **Editor** (`F4`, `Shift+F4` — new file, the name under the cursor is prefilled in the prompt): saving with `F2`/`Ctrl+S`
-  in the original encoding, including into an archive; undo, search, `Ctrl+G`.
+  in the original encoding, including into an archive; undo, search, `Ctrl+G`. Line numbers as in the viewer;
+  a file with too wide lines (see the viewer) is opened with word wrap.
   Menus File (Save, Save as, Reload, Close) and Edit (Copy, Select all, Find, Find next).
 - **Content comparison** (`Ctrl+Shift+F3`): two files side by side, LCS diff, differences in red, `Alt+↑/↓`, synchronized scrolling,
   two-line panel `F9`. Comparing panel file lists — `Shift+F2`.

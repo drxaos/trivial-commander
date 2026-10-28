@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=TCM
+Comment=Two-panel file manager
+Exec=tcm %F
+Icon=tcm
+Terminal=false
+Categories=System;FileTools;FileManager;

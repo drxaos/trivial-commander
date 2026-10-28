@@ -17,6 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import com.github.junrar.Archive;
 import com.github.junrar.exception.RarException;
 import com.github.junrar.rarfile.FileHeader;
+import com.github.junrar.rarfile.HostSystem;
 
 /**
  * RAR (via junrar) — read only. junrar picks up multi-volume archives by volume names itself.
@@ -33,9 +34,22 @@ final class RarArchives {
         try (Archive rar = open(index.getArchive())) {
             for (final FileHeader fh : rar.getFileHeaders()) {
                 final long time = fh.getMTime() != null ? fh.getMTime().getTime() : 0;
-                index.add(fh.getFileName(), fh.isDirectory(), fh.getFullUnpackSize(), time);
+                index.add(fh.getFileName(), fh.isDirectory(), fh.getFullUnpackSize(), time, attrs(fh));
             }
         }
+    }
+
+    /** RAR keeps the attributes of the system it was packed on: the Unix mode or the DOS attribute byte. */
+    private static @NotNull String attrs(final @NotNull FileHeader fh) {
+        final HostSystem host = fh.getHostOS();
+        if (host == null) {
+            return "";
+        }
+        if (host == HostSystem.unix || host == HostSystem.macos || host == HostSystem.beos) {
+            return FileAttrs.posix(fh.getFileAttr());
+        }
+
+        return FileAttrs.dos(fh.getFileAttr());
     }
 
     static @NotNull ArchiveReader reader(final @NotNull Path archive) throws IOException {

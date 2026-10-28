@@ -147,6 +147,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         getContentPane().add(bottom, BorderLayout.SOUTH);
         registerGlobalKeys();
         AppWindows.setHelpHandler(w -> HelpDialog.show(w, HelpDialog.VIEWER));
+        AppWindows.setIcons(Icons.windowImages(Icons.FILE), Icons.windowImages(Icons.IMAGE));
         // before GlobalKeys: global shortcuts must already see the corrected modifiers
         LayoutSwitchKeys.install();
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(new GlobalKeys());
@@ -520,7 +521,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
             dst.goToFile(f);
         } else if (f != null && !f.isParentLink() && f.isDirectory()) {
             dst.navigate(f, null, true);
-        } else if (f != null && f.isArchiveFile() && f.isLocal()) {
+        } else if (f != null && f.isArchiveFile()) {
             dst.openArchive(f);
         } else {
             dst.navigate(src.getDir(), null, true);

@@ -88,7 +88,7 @@ public final class FileCommands {
 
     // ---- viewing and editing ----
 
-    /** F3: selected files (or the file under the cursor); on a directory — size counting. */
+    /** F3: selected files (or the file under the cursor); on a directory — enter it, as Enter does. */
     public void view(final boolean cursorOnly) {
         final PanelTab tab = active();
         final VFile cursor = tab.getCursorFile();
@@ -104,11 +104,11 @@ public final class FileCommands {
 
             return;
         }
-        if (cursor == null || cursor.isParentLink()) {
+        if (cursor == null) {
             return;
         }
         if (cursor.isDirectory()) {
-            tab.calculateSizes(List.of(cursor));
+            tab.openCursor();
 
             return;
         }

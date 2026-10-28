@@ -5,12 +5,17 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Desktop;
 import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.InputEvent;
 import java.awt.image.BufferedImage;
 import java.awt.print.PrinterException;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
@@ -43,6 +48,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import javax.swing.Timer;
 import javax.swing.UIManager;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.MenuEvent;
@@ -76,19 +82,22 @@ public final class ViewerPanel extends JPanel {
     private static final int MAX_DUMP_BYTES = 4 * 1024 * 1024;
     private static final int BINARY_WIDTH = 80;
     private static final int FAST_WHEEL = 5;
-    private static final int MAX_LINE = 10_000;
+    /** Document property (AbstractDocument.I18NProperty is package-private): bidi/complex text views. */
+    private static final String I18N_PROPERTY = "i18n";
+    private static final int MAX_I18N_CHARS = 64 * 1024;
+    private static final int READ_CHUNK = 64 * 1024;
+    private static final int REWRAP_DELAY = 300;
+    private static final int DEFAULT_WRAP_WIDTH = 800;
+    private static final int MIN_WRAP_WIDTH = 100;
     private static final Charset CP1251 = Charset.forName("windows-1251");
     private static final Charset CP866 = Charset.forName("IBM866");
 
     private final CardLayout cards = new CardLayout();
-    private final JTextArea text = new JTextArea() {
-        @Override
-        public void updateUI() {
-            super.updateUI();
-            useEditableBackground(this);
-        }
-    };
+    private final ViewerText text = new ViewerText();
+    /** Large text: measured and drawn without shaping (see PlainMetrics, UnshapedViews). */
+    private boolean unshapedMetrics;
     private final JScrollPane textScroll = new JScrollPane(text);
+    private final LineNumbers lineNumbers = new LineNumbers(text);
     private final JEditorPane markdown = new JEditorPane() {
         @Override
         public void updateUI() {
@@ -106,6 +115,8 @@ public final class ViewerPanel extends JPanel {
     private boolean truncated;
     private @Nullable BufferedImage picture;
     private Mode mode = Mode.AUTO;
+    /** Mode of the text on screen: AUTO resolved (binary data — BINARY, otherwise TEXT). */
+    private Mode shownMode = Mode.TEXT;
     private @Nullable Charset charset;
     private float fontSize;
     private int loadGeneration;
@@ -118,6 +129,44 @@ public final class ViewerPanel extends JPanel {
     private final List<JMenu> imageMenus = new ArrayList<>();
     /** The viewer window flips through the directory's images with ←/→; not set in quick view. */
     private @Nullable IntConsumer imageNavigator;
+    /** Line length the shown text was cut at (see LongLines) and its longest line before cutting. */
+    private int shownMaxLine;
+    private int shownLongest;
+    /** Row width in pixels a large text was wrapped at in the background (see LongLines.wrap); 0 — not wrapped so. */
+    private int shownWrapWidth;
+    /** After the viewer is resized, a text wrapped in the background is wrapped anew — once the size settles. */
+    private final Timer rewrapTimer = new Timer(REWRAP_DELAY, e -> rewrap());
+    /** Scroll position to return to after rewrapping, as a fraction of the text height; negative — to the start. */
+    private float restoreScroll = -1;
+
+    /** Text area of the viewer: a large text is measured and drawn without shaping (see PlainMetrics, UnshapedViews). */
+    private final class ViewerText extends JTextArea {
+
+        /** The same instance for the same font: the text view re-measures all lines whenever its metrics object changes. */
+        private @Nullable PlainMetrics plain;
+
+        @Override
+        public void updateUI() {
+            setUI(new UnshapedViews.AreaUI(() -> unshapedMetrics));
+            useEditableBackground(this);
+        }
+
+        @Override
+        public FontMetrics getFontMetrics(final Font f) {
+            return unshapedMetrics ? plainMetrics(f) : super.getFontMetrics(f);
+        }
+
+        @NotNull PlainMetrics plainMetrics(final @NotNull Font f) {
+            final PlainMetrics pm = plain;
+            if (pm != null && pm.getFont().equals(f)) {
+                return pm;
+            }
+            final PlainMetrics created = new PlainMetrics(super.getFontMetrics(f));
+            plain = created;
+
+            return created;
+        }
+    }
 
     public ViewerPanel() {
         super(new BorderLayout());
@@ -126,6 +175,16 @@ public final class ViewerPanel extends JPanel {
         fontSize = text.getFont().getSize2D();
         text.getCaret().setVisible(false);
         final JPanel content = new JPanel(cards);
+        textScroll.setRowHeaderView(lineNumbers);
+        rewrapTimer.setRepeats(false);
+        textScroll.getViewport().addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(final ComponentEvent e) {
+                if (shownWrapWidth > 0 && wrapWidth() != shownWrapWidth) {
+                    rewrapTimer.restart();
+                }
+            }
+        });
         content.add(textScroll, "text");
         markdown.setEditable(false);
         markdown.setContentType("text/html");
@@ -259,15 +318,22 @@ public final class ViewerPanel extends JPanel {
         if (showingMarkdown) {
             return 8;
         }
-        if (mode == Mode.AUTO || mode == Mode.TEXT) {
-            if (StandardCharsets.UTF_16LE.equals(charset)) {
-                return 6;
-            }
+        switch (shownMode) {
+            case BINARY:
+                return 2;
+            case HEX:
+                return 3;
+            case HTML:
+                return 5;
+            case JSON:
+                return 9;
+            default:
+                if (StandardCharsets.UTF_16LE.equals(charset)) {
+                    return 6;
+                }
 
-            return StandardCharsets.UTF_8.equals(charset) ? 7 : 1;
+                return StandardCharsets.UTF_8.equals(charset) ? 7 : 1;
         }
-
-        return mode == Mode.BINARY ? 2 : mode == Mode.HEX ? 3 : mode == Mode.HTML ? 5 : mode == Mode.JSON ? 9 : 1;
     }
 
     private static @NotNull JCheckBoxMenuItem numbered(final int n, final @NotNull String text, final @NotNull Runnable action) {
@@ -360,7 +426,10 @@ public final class ViewerPanel extends JPanel {
                     picture = (BufferedImage) r[2];
                     imageView.setImage(picture);
                     if (r[3] != null) {
+                        shownMode = Mode.TEXT;
                         showText(plainDocument((String) r[3]), target.getLocation(), "");
+                        shownLongest = 0;
+                        shownWrapWidth = 0;
 
                         return;
                     }
@@ -406,7 +475,7 @@ public final class ViewerPanel extends JPanel {
         final byte[] bytes;
         final boolean cut;
         try (InputStream in = Vfs.openInput(target)) {
-            bytes = in.readNBytes(MAX_BYTES);
+            bytes = readCancellable(in);
             cut = in.read() >= 0;
         }
         BufferedImage img = null;
@@ -415,6 +484,27 @@ public final class ViewerPanel extends JPanel {
         }
 
         return new Object[] {bytes, cut, img, null};
+    }
+
+    /**
+     * The first MAX_BYTES in chunks: unpacking from an archive does not react to interruption by itself,
+     * and a closed viewer window must not keep reading.
+     */
+    private static byte[] readCancellable(final @NotNull InputStream in) throws IOException {
+        final ByteArrayOutputStream out = new ByteArrayOutputStream();
+        final byte[] buf = new byte[READ_CHUNK];
+        while (out.size() < MAX_BYTES) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException();
+            }
+            final int n = in.read(buf, 0, Math.min(buf.length, MAX_BYTES - out.size()));
+            if (n < 0) {
+                break;
+            }
+            out.write(buf, 0, n);
+        }
+
+        return out.toByteArray();
     }
 
     /** Recompute image scale after the window is resized. */
@@ -450,7 +540,7 @@ public final class ViewerPanel extends JPanel {
         if (f == null) {
             return;
         }
-        final Mode effective = mode == Mode.AUTO ? (picture != null ? Mode.IMAGE : isMarkdownFile(f) ? Mode.MARKDOWN : Mode.TEXT) : mode;
+        final Mode effective = mode == Mode.AUTO ? autoMode(f) : mode;
         if (effective == Mode.IMAGE && picture != null) {
             startGeneration();
             showImage();
@@ -461,6 +551,14 @@ public final class ViewerPanel extends JPanel {
         final byte[] bytes = data;
         final Charset cs = charset;
         final float size = fontSize;
+        final int maxLine = LongLines.maxChars(text, text.getFont());
+        final PlainMetrics widths = text.plainMetrics(text.getFont());
+        final boolean wrap = text.getLineWrap();
+        final boolean words = text.getWrapStyleWord();
+        final int wrapWidth = wrapWidth();
+        final int tabWidth = text.getTabSize() * widths.charWidth('m');
+        final float scroll = restoreScroll;
+        restoreScroll = -1;
         final HTMLEditorKit kit = (HTMLEditorKit) markdown.getEditorKit();
         status.setText("Converting " + f.getName() + "...");
         start(new SwingWorker<Object[], Void>() {
@@ -472,8 +570,16 @@ public final class ViewerPanel extends JPanel {
 
                     return new Object[] {htmlDocument(kit, MarkdownHtml.toHtml(decode(bytes, cs), size, dir)), name};
                 }
+                final String converted = convert(effective, bytes, cs);
+                final boolean large = converted.length() > MAX_I18N_CHARS;
+                if (large) {
+                    widths.measureAll(converted);
+                }
+                final LongLines.Split split = large && wrap
+                    ? LongLines.wrap(converted, widths, wrapWidth, tabWidth, words)
+                    : LongLines.split(converted, maxLine);
 
-                return new Object[] {plainDocument(convert(effective, bytes, cs)), name};
+                return new Object[] {plainDocument(split.getText()), name, split.getNumbers(), split.getLongest(), large && wrap ? wrapWidth : 0};
             }
 
             @Override
@@ -486,7 +592,19 @@ public final class ViewerPanel extends JPanel {
                     if (effective == Mode.MARKDOWN) {
                         showMarkdown((HTMLDocument) r[0], f.getLocation(), (String) r[1]);
                     } else {
+                        shownMode = effective;
                         showText((Document) r[0], f.getLocation(), (String) r[1]);
+                        lineNumbers.setNumbers((int[]) r[2]);
+                        // the hex dump has its own offsets
+                        textScroll.setRowHeaderView(effective == Mode.HEX ? null : lineNumbers);
+                        shownMaxLine = maxLine;
+                        shownLongest = (Integer) r[3];
+                        shownWrapWidth = (Integer) r[4];
+                        if (scroll >= 0) {
+                            final JScrollBar bar = textScroll.getVerticalScrollBar();
+                            // after the new document is laid out
+                            SwingUtilities.invokeLater(() -> bar.setValue(Math.round(scroll * bar.getMaximum())));
+                        }
                     }
                 } catch (final InterruptedException | CancellationException e) {
                     // conversion was cancelled — nothing to show
@@ -497,6 +615,21 @@ public final class ViewerPanel extends JPanel {
         });
     }
 
+    /**
+     * Without an explicit mode: an image, rendered Markdown, a dump of binary data (as text it is megabytes of control characters
+     * and random letters of all alphabets), otherwise text. A charset chosen by hand (6, 7, A, S) means text.
+     */
+    private @NotNull Mode autoMode(final @NotNull VFile f) {
+        if (picture != null) {
+            return Mode.IMAGE;
+        }
+        if (isMarkdownFile(f)) {
+            return Mode.MARKDOWN;
+        }
+
+        return charset == null && TextUtil.looksBinary(data) ? Mode.BINARY : Mode.TEXT;
+    }
+
     private static @NotNull String convert(final @NotNull Mode effective, final byte @NotNull [] bytes, final @Nullable Charset cs) {
         switch (effective) {
             case HEX:
@@ -504,48 +637,20 @@ public final class ViewerPanel extends JPanel {
             case BINARY:
                 return binaryDump(bytes, cs);
             case HTML:
-                return splitLongLines(stripHtml(decode(bytes, cs)));
+                return stripHtml(decode(bytes, cs));
             case JSON:
-                return splitLongLines(JsonPretty.format(decode(bytes, cs)));
+                return JsonPretty.format(decode(bytes, cs));
             default:
-                return splitLongLines(decode(bytes, cs));
+                return decode(bytes, cs);
         }
     }
 
     /**
-     * Lines longer than MAX_LINE are wrapped: JTextArea measures and paints a whole line on every repaint,
-     * and a single multi-megabyte line (minified JSON, a log without line breaks) locked up the window for good.
+     * The document is built off the EDT: until it is shown, Swing does not access it.
+     * A combining mark (e.g. a stress mark U+0301) or RTL text sets the "i18n" property, and the text area then lays out
+     * every glyph of the whole document on the EDT — tens of seconds for megabytes, the whole application freezes.
+     * A large text gets the plain view: drawString still draws such characters itself.
      */
-    private static @NotNull String splitLongLines(final @NotNull String text) {
-        int run = 0;
-        int i = 0;
-        // fast path: no long lines — no copy needed
-        for (; i < text.length(); i++) {
-            run = text.charAt(i) == '\n' ? 0 : run + 1;
-            if (run > MAX_LINE) {
-                break;
-            }
-        }
-        if (i == text.length()) {
-            return text;
-        }
-        final StringBuilder sb = new StringBuilder(text.length() + text.length() / MAX_LINE + 16);
-        run = 0;
-        for (int k = 0; k < text.length(); k++) {
-            checkCancelled(k);
-            final char c = text.charAt(k);
-            if (c != '\n' && run == MAX_LINE) {
-                sb.append('\n');
-                run = 0;
-            }
-            sb.append(c);
-            run = c == '\n' ? 0 : run + 1;
-        }
-
-        return sb.toString();
-    }
-
-    /** The document is built off the EDT: until it is shown, Swing does not access it. */
     private static @NotNull Document plainDocument(final @NotNull String body) {
         final PlainDocument doc = new PlainDocument();
         try {
@@ -553,6 +658,9 @@ public final class ViewerPanel extends JPanel {
         } catch (final BadLocationException e) {
             // insertion at the start of an empty document
             throw new IllegalStateException(e);
+        }
+        if (body.length() > MAX_I18N_CHARS) {
+            doc.putProperty(I18N_PROPERTY, Boolean.FALSE);
         }
 
         return doc;
@@ -632,6 +740,8 @@ public final class ViewerPanel extends JPanel {
         showingImage = false;
         showingMarkdown = false;
         updateMenus();
+        // before setDocument: the new view takes its metrics once
+        unshapedMetrics = doc.getLength() > MAX_I18N_CHARS;
         text.setDocument(doc);
         text.setCaretPosition(0);
         cards.show((JPanel) textScroll.getParent(), "text");
@@ -643,7 +753,7 @@ public final class ViewerPanel extends JPanel {
 
             return;
         }
-        final String modeName = mode == Mode.AUTO ? "text" : mode.name().toLowerCase(Locale.ROOT);
+        final String modeName = shownMode.name().toLowerCase(Locale.ROOT);
         status.setText(location + "   [" + modeName + ", " + charsetName + (text.getLineWrap() ? ", wrap" : "") + "]"
             + (truncated ? "   (first " + TextUtil.shortSize(MAX_BYTES) + " shown)" : ""));
     }
@@ -702,7 +812,8 @@ public final class ViewerPanel extends JPanel {
             checkCancelled(i);
             final String line = s.substring(i, Math.min(s.length(), i + BINARY_WIDTH));
             for (final char c : line.toCharArray()) {
-                sb.append(c < 32 ? '.' : c);
+                // C0 and C1 (ISO-8859-1 0x80–0x9F) control characters have no glyph
+                sb.append(c < 32 || c >= 0x7F && c < 0xA0 ? '.' : c);
             }
             sb.append('\n');
         }
@@ -879,6 +990,42 @@ public final class ViewerPanel extends JPanel {
     private void toggleVariableWidth() {
         variableWidth = !variableWidth;
         text.setFont(new Font(variableWidth ? Font.SANS_SERIF : Font.MONOSPACED, Font.PLAIN, 13).deriveFont(fontSize));
+        recutLongLines();
+    }
+
+    /** A wider font fits fewer characters into a safe line width: long lines are cut anew, a text wrapped in the background is rewrapped. */
+    private void recutLongLines() {
+        final int maxLine = LongLines.maxChars(text, text.getFont());
+        if (showingImage || showingMarkdown) {
+            return;
+        }
+        if (shownWrapWidth > 0 || maxLine != shownMaxLine && shownLongest > Math.min(maxLine, shownMaxLine)) {
+            render();
+        }
+    }
+
+    /** Row width for wrapping in the background: the visible width of the text, with the vertical scroll bar a large text will have. */
+    private int wrapWidth() {
+        final JScrollBar bar = textScroll.getVerticalScrollBar();
+        int width = textScroll.getViewport().getExtentSize().width;
+        if (width <= 0) {
+            width = DEFAULT_WRAP_WIDTH;
+        } else if (!bar.isVisible()) {
+            width -= bar.getPreferredSize().width;
+        }
+        final Insets in = text.getInsets();
+
+        return Math.max(MIN_WRAP_WIDTH, width - in.left - in.right - 1);
+    }
+
+    /** The viewer was resized: the text wrapped in the background is wrapped at the new width, keeping the scroll position. */
+    private void rewrap() {
+        if (shownWrapWidth == 0 || showingImage || showingMarkdown || wrapWidth() == shownWrapWidth) {
+            return;
+        }
+        final JScrollBar bar = textScroll.getVerticalScrollBar();
+        restoreScroll = bar.getMaximum() > 0 ? (float) bar.getValue() / bar.getMaximum() : 0;
+        render();
     }
 
     private void zoom(final float factor) {
@@ -897,6 +1044,8 @@ public final class ViewerPanel extends JPanel {
         text.setFont(text.getFont().deriveFont(fontSize));
         if (showingMarkdown) {
             render();
+        } else {
+            recutLongLines();
         }
     }
 

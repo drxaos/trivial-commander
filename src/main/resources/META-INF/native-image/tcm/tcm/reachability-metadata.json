@@ -1,6 +1,10 @@
 {
   "reflection": [
     {
+      "type": "tcm.apps.UnshapedViews$Plain",
+      "allDeclaredMethods": true
+    },
+    {
       "type": "java.rmi.MarshalledObject",
       "methods": [
         {

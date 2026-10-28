@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Same folder as the window icon (Icons.paintFolder) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 16 16">
+    <path d="M1.5 3.5H6L7.5 5H14.5V13.5H1.5Z" fill="#F5C451" stroke="#C8962A" stroke-width="1"/>
+    <path d="M2 6.5H14" stroke="#C8962A" stroke-width="1"/>
+</svg>

@@ -84,10 +84,12 @@ public final class EditorWindow {
         this.file = file;
         this.onSaved = onSaved;
         window = AppWindows.create(owner, file.getName());
+        AppWindows.setFileIcon(window, false);
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         area.setEditable(false);
         area.addCaretListener(e -> updateStatus());
         final JScrollPane scroll = new JScrollPane(area);
+        scroll.setRowHeaderView(new LineNumbers(area));
         AppWindows.container(window).getContentPane().add(scroll, BorderLayout.CENTER);
         status.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         AppWindows.container(window).getContentPane().add(status, BorderLayout.SOUTH);
@@ -119,7 +121,7 @@ public final class EditorWindow {
                 doc.putProperty(PlainDocument.tabSizeAttribute, TAB_SIZE);
                 doc.insertString(0, d.getText(), null);
 
-                return new Object[] {d, doc};
+                return new Object[] {d, doc, LongLines.longest(d.getText())};
             }
 
             @Override
@@ -130,7 +132,7 @@ public final class EditorWindow {
                 loader = null;
                 try {
                     final Object[] r = get();
-                    showLoaded((TextUtil.Decoded) r[0], (PlainDocument) r[1]);
+                    showLoaded((TextUtil.Decoded) r[0], (PlainDocument) r[1], (Integer) r[2]);
                 } catch (final InterruptedException | CancellationException e) {
                     // reading was cancelled
                 } catch (final ExecutionException e) {
@@ -149,8 +151,10 @@ public final class EditorWindow {
         w.execute();
     }
 
-    private void showLoaded(final TextUtil.@NotNull Decoded d, final @NotNull PlainDocument doc) {
+    private void showLoaded(final TextUtil.@NotNull Decoded d, final @NotNull PlainDocument doc, final int longest) {
         decoded = d;
+        // the editor cannot cut lines as the viewer does: too wide lines are wrapped (see LongLines)
+        area.setLineWrap(longest > LongLines.maxChars(area, area.getFont()));
         area.setDocument(doc);
         doc.addUndoableEditListener(undo);
         doc.addDocumentListener(modifiedListener);
@@ -355,6 +359,7 @@ public final class EditorWindow {
             final int line = area.getLineOfOffset(pos);
             final int col = pos - area.getLineStartOffset(line);
             status.setText("Ln " + (line + 1) + ", Col " + (col + 1) + "    " + d.getCharset().name() + (d.getBom() != null ? " BOM" : "")
+                + (area.getLineWrap() ? ", wrap" : "")
                 + "    F2/Ctrl+S save, F7 find, F3 next, Ctrl+G line, Esc close");
         } catch (final BadLocationException e) {
             status.setText(" ");

@@ -28,6 +28,7 @@
         <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
         <native-maven-plugin.version>0.11.4</native-maven-plugin.version>
         <maven-assembly-plugin.version>3.7.1</maven-assembly-plugin.version>
+        <exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
     </properties>
 
     <dependencies>
@@ -178,6 +179,8 @@
                         <configuration>
                             <imageName>tcm</imageName>
                             <mainClass>tcm.Main</mainClass>
+                            <!-- base SBOM gets attached as an artifact and then deleted, which breaks mvn install -->
+                            <skipBaseSBOM>true</skipBaseSBOM>
                             <metadataRepository>
                                 <enabled>false</enabled>
                             </metadataRepository>
@@ -199,6 +202,29 @@
                                         <descriptor>src/assembly/linux-amd64.xml</descriptor>
                                     </descriptors>
                                     <attach>false</attach>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- the same files as an AppImage: target/tcm-VERSION-linux-amd64.AppImage (needs mksquashfs) -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>${exec-maven-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>appimage-linux-amd64</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/src/appimage/build.sh</argument>
+                                        <argument>${project.build.directory}</argument>
+                                        <argument>${project.build.finalName}</argument>
+                                    </arguments>
                                 </configuration>
                             </execution>
                         </executions>
