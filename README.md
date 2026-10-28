@@ -15,21 +15,9 @@ Or in an IDE: run `tcm.Main`. The full key list is `F1` in the program.
 ### Native image (GraalVM)
 
 ```bash
-GRAALVM_HOME=../graalvm-25.4.4.1.1 mvn -Pnative package   # ~5 min, target/tcm + lib*.so (AWT)
+GRAALVM_HOME=../graalvm-25.4.4.1.1 mvn -Pnative package   # ~3 min, target/tcm + lib*.so (AWT)
 target/tcm
 ```
-
-The executable runs only together with the `lib*.so` libraries from `target/`: these are AWT and JDK fonts,
-they must be moved along with it. Reflection/JNI/resource metadata lives in
-`src/main/resources/META-INF/native-image/tcm/tcm/` and was collected by the agent
-(`java -agentlib:native-image-agent=config-merge-dir=...`) while exercising all windows in all themes.
-If new code is added that accesses classes via reflection, the agent has to be run again.
-All FlatLaf UI delegates, borders and icons from its `.properties` are registered in full: the agent sees only what
-was shown during the run (that is how `FlatToolTipUI` got lost). Complex text (emoji, combining diacritics,
-Hebrew, Arabic, Devanagari, Thai) is laid out by JDK 25 via HarfBuzz over FFM: its downcalls/upcalls are in the
-`foreign` section, the agent records them on files with such names.
-Re-running requires a clean `user.home`: otherwise the JVM takes fonts from the `~/.java/fonts` cache,
-and the agent does not record fontconfig JNI calls.
 
 ## Features
 
@@ -106,44 +94,3 @@ and the agent does not record fontconfig JNI calls.
   letters typed in the panel go to the line, the line is a history drop-down (arrow on the right, `Alt+F8`, `Ctrl+↓`), `Ctrl+E` — previous command,
   `Ctrl+Enter`/`Ctrl+P` — name/path into the line.
 - **Themes** FlatLaf (Configuration): Light, Dark, IntelliJ, Darcula. Window, tab and history state is saved (`java.util.prefs`) on exit (and on `Cmd+Q` on macOS) and every 30 s.
-
-### Keys
-
-The layout is taken from the TC reference (`shortcuts.html`); not implemented: network functions (FTP, LPT/USB), plugins,
-directory synchronization, `descript.ion` comments and navigation chains. Differences from TC:
-
-| Key | Here | In TC |
-|---|---|---|
-| `Ctrl+Shift+F3` | compare by content | not assigned in the main window |
-| `Ctrl+H` | show/hide hidden files | not assigned |
-
-## Structure
-
-```
-src/main/java/tcm/
-  Main.java               entry point, FlatLaf themes
-  MainFrame               menu, toolbar, command line, F-keys, global key map
-  FileCommands            file commands (F3–F8, archives, search, comparison, clipboard, launching)
-  core/                   VFile, Vfs ("archive.zip!/entry"), ArchiveIndex, ArchiveFormat (extension/signature),
-                          ArchiveReader, TarArchives, RarArchives, ZipOps (add/remove/rename/extract),
-                          Searcher, TreeStats, Trash (freedesktop.org trash / Desktop)
-  ops/                    Job, JobContext (progress/pause/cancel), JobRunner (queue), Copy/Delete/Pack/Unpack/Test/LinkJob
-  ui/                     FilePanel (tabs), PanelTab, PanelMouse (mouse gestures), PanelDrop/PanelExport (files from and to the OS),
-                          LayoutSwitchKeys (modifiers on layout switch),
-                          FileTable, FileTableModel, QuickBar, CommandLine, FileClipboard, icons
-  ui/dialogs/             copy, overwrite, progress, pack, search, tree, multi-rename, properties, help
-  apps/                   viewer (ViewerPanel/ViewerWindow, ImageView), editor, compare, console
-  util/                   encodings, masks, diff (Hirschberg), settings, Keys
-```
-
-## Smoke test (no GUI)
-
-```bash
-mvn compile
-java -cp "target/classes:$(mvn dependency:build-classpath -q -Dmdep.outputFile=/dev/stdout)" tcm.SmokeTest
-```
-
-Checks: listing, copying locally/into an archive/from an archive/inside an archive, overwrite, packing, deleting entries,
-mkdir and rename inside an archive, moving, unpacking, JAR, search (mask, depth, text, RegEx, archives, size),
-size calculation, archive CRC testing, symbolic links, zip-slip protection, DOS names in ZIP (CP866/CP437), masks, diff, encodings,
-TAR/TAR.GZ/TGZ/TAR.BZ2/TAR.XZ/RAR5 (listing, reading, unpacking, testing, write rejection, broken gzip), opening by signature.
