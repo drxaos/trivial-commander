@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
@@ -25,8 +27,10 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream;
 import org.jetbrains.annotations.NotNull;
 
+import tcm.apps.ConsoleWindow;
 import tcm.core.ArchiveFormat;
 import tcm.core.DirWatcher;
+import tcm.core.FileAttrs;
 import tcm.core.Progress;
 import tcm.core.Searcher;
 import tcm.core.Trash;
@@ -168,6 +172,62 @@ public final class SmokeTest {
         checkNestedArchives(root);
         checkWatcher(root);
         checkUtils();
+        checkPlatform(root);
+    }
+
+    /** Behavior that differs between OSes: deleting read-only files, the command line (spaces, console encoding), attributes. */
+    private static void checkPlatform(final @NotNull Path root) throws Exception {
+        final Path ro = Files.writeString(root.resolve("ro.txt"), "ro");
+        check(ro.toFile().setWritable(false), "make file read-only");
+        Trash.delete(ro);
+        check(!Files.exists(ro), "delete read-only file");
+        final Path ro2 = Files.writeString(root.resolve("ro2.txt"), "ro");
+        check(ro2.toFile().setWritable(false), "make file read-only again");
+        check(Trash.deleteIfExists(ro2) && !Files.exists(ro2), "deleteIfExists read-only file");
+        check(!Trash.deleteIfExists(ro2), "deleteIfExists missing file");
+
+        final Path dosOut = Files.createDirectories(root.resolve("dosattr"));
+        final Path hidden = Files.writeString(dosOut.resolve("h.txt"), "h");
+        FileAttrs.apply(hidden, "r-h-");
+        final VFile hiddenFile = Vfs.stat(hidden);
+        if (POSIX) {
+            check(!Files.isWritable(hidden), "dos read-only flag on Unix removes write permission");
+        } else {
+            check(hiddenFile.isHidden() && hiddenFile.getAttrs().equals("r-h-"), "dos attributes on Windows: " + hiddenFile.getAttrs());
+        }
+        Trash.delete(hidden);
+
+        final Path spaced = Files.createDirectories(root.resolve("dir with space"));
+        final boolean windows = !POSIX;
+        final Path script = spaced.resolve(windows ? "echo args.cmd" : "echo args.sh");
+        Files.writeString(script, windows ? "@echo args:%*\r\n" : "#!/bin/sh\necho args:\"$@\"\n");
+        script.toFile().setExecutable(true);
+        final String quoted = "\"" + script + "\"";
+        check(runShell(quoted + " \"x y\"", spaced).equals("args:" + (windows ? "\"x y\"" : "x y")), "command line: quoted program with arguments");
+        final Charset cs = ConsoleWindow.consoleCharset();
+        final String text = cs.newEncoder().canEncode("Привет") ? "Привет" : "hello";
+        check(runShell("echo " + text, spaced).equals(text), "console output encoding " + cs + ": " + text);
+        check(runShell("cd", spaced).contains("dir with space") || !windows, "console working directory");
+
+        final Path target = Files.writeString(root.resolve("link-target.txt"), "t");
+        final Path link = root.resolve("link.txt");
+        try {
+            Files.createSymbolicLink(link, target);
+            check(Files.isSymbolicLink(link) && Files.readString(link).equals("t"), "symbolic link");
+            Trash.delete(link);
+            check(Files.exists(target) && !Files.exists(link, LinkOption.NOFOLLOW_LINKS), "deleting a link keeps its target");
+        } catch (final FileSystemException | UnsupportedOperationException e) {
+            System.out.println("  skip symbolic links: " + e);
+        }
+    }
+
+    private static @NotNull String runShell(final @NotNull String command, final @NotNull Path dir) throws Exception {
+        final Process p = new ProcessBuilder(ConsoleWindow.shellCommand(command)).directory(dir.toFile()).redirectErrorStream(true).start();
+        p.getOutputStream().close();
+        final String out = new String(p.getInputStream().readAllBytes(), ConsoleWindow.consoleCharset()).trim();
+        p.waitFor();
+
+        return out;
     }
 
     private static void checkWatcher(final @NotNull Path root) throws Exception {

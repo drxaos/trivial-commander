@@ -40,7 +40,8 @@ public final class Main {
      * A native image has no java.home, and AWT reads font settings relative to it. If java.home has no lib directory,
      * FontConfiguration assumes it found a vendor fontconfig.properties and does not consult the system fontconfig
      * ("Fontconfig head is null"). So java.home is the executable's directory if lib is next to it,
-     * otherwise a temporary directory with an empty lib.
+     * otherwise a temporary directory with an empty lib. Windows has no system fontconfig at all: there the distribution
+     * carries lib/fontconfig.bfc next to tcm.exe.
      */
     private static void initNativeImage() {
         if (System.getProperty("java.home") != null) {

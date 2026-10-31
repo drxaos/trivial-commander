@@ -351,7 +351,7 @@ public final class CopyJob extends Job {
         for (final VFile f : movedFiles) {
             if (f.isLocal()) {
                 ctx.setCurrent("Deleting " + f.getLocation());
-                Files.deleteIfExists(f.getHostPath());
+                Trash.deleteIfExists(f.getHostPath());
             } else {
                 archiveEdits.computeIfAbsent(f.getHostPath(), k -> new ZipEdit()).remove(f.getEntry());
                 movedEntries.computeIfAbsent(f.getHostPath(), k -> new HashSet<>()).add(f.getEntry());

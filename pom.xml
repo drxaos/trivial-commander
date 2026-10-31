@@ -29,6 +29,9 @@
         <native-maven-plugin.version>0.11.4</native-maven-plugin.version>
         <maven-assembly-plugin.version>3.7.1</maven-assembly-plugin.version>
         <exec-maven-plugin.version>3.6.3</exec-maven-plugin.version>
+        <!-- the native distributions are per OS: the profile "windows" below swaps the defaults -->
+        <dist.linux.skip>false</dist.linux.skip>
+        <dist.windows.skip>true</dist.windows.skip>
     </properties>
 
     <dependencies>
@@ -157,7 +160,19 @@
     </build>
 
     <profiles>
-        <!-- graalvm-25 -->
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <dist.linux.skip>true</dist.linux.skip>
+                <dist.windows.skip>false</dist.windows.skip>
+            </properties>
+        </profile>
+        <!-- graalvm-25; on Windows run from a shell with the MSVC environment (vcvars64.bat / x64 Native Tools Command Prompt) -->
         <profile>
             <id>native</id>
             <build>
@@ -186,6 +201,33 @@
                             </metadataRepository>
                         </configuration>
                     </plugin>
+                    <!-- Windows has no system fontconfig: AWT reads java.home/lib/fontconfig.bfc, java.home is the exe directory (see Main) -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <version>${maven-resources-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>fontconfig-windows</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${dist.windows.skip}</skip>
+                                    <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${env.GRAALVM_HOME}/lib</directory>
+                                            <includes>
+                                                <include>fontconfig.bfc</include>
+                                            </includes>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-assembly-plugin</artifactId>
@@ -202,6 +244,21 @@
                                         <descriptor>src/assembly/linux-amd64.xml</descriptor>
                                     </descriptors>
                                     <attach>false</attach>
+                                    <skipAssembly>${dist.linux.skip}</skipAssembly>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>dist-windows-amd64</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <configuration>
+                                    <descriptors>
+                                        <descriptor>src/assembly/windows-amd64.xml</descriptor>
+                                    </descriptors>
+                                    <attach>false</attach>
+                                    <skipAssembly>${dist.windows.skip}</skipAssembly>
                                 </configuration>
                             </execution>
                         </executions>
@@ -219,6 +276,7 @@
                                     <goal>exec</goal>
                                 </goals>
                                 <configuration>
+                                    <skip>${dist.linux.skip}</skip>
                                     <executable>bash</executable>
                                     <arguments>
                                         <argument>${project.basedir}/src/appimage/build.sh</argument>

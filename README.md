@@ -15,12 +15,26 @@ Or in an IDE: run `tcm.Main`. The full key list is `F1` in the program.
 ### Native image (GraalVM)
 
 ```bash
-GRAALVM_HOME=../graalvm-25.4.4.1.1 mvn -Pnative package   # ~3 min, target/tcm + lib*.so (AWT)
+mvn -Pnative package   # ~3 min, target/tcm + lib*.so (AWT)
 target/tcm
 ```
 
 Also packs `target/tcm-1.0.0-linux-amd64.tar.xz` and `target/tcm-1.0.0-linux-amd64.AppImage`
 (the AppImage needs `mksquashfs` from squashfs-tools; the AppImage runtime is downloaded once into `~/.cache/appimage`).
+
+#### Windows
+
+Needs Visual Studio 2022 (17.6+) with the "Desktop development with C++" workload. Run it from an
+"x64 Native Tools Command Prompt for VS 2022" (or after `vcvars64.bat`); the `windows` profile is activated automatically:
+
+```bat
+mvn -Pnative package
+target\tcm.exe
+```
+
+Packs `target/tcm-1.0.0-windows-amd64.zip`: `tcm.exe`, the JDK DLLs it loads (AWT, fonts, JPEG, color management)
+and `lib/fontconfig.bfc` (Windows has no system fontconfig, without it the UI does not start) must stay together.
+The Linux archives are skipped on Windows.
 
 ## Features
 

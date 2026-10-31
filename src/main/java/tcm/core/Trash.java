@@ -4,10 +4,12 @@ import java.awt.Desktop;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -46,7 +48,48 @@ public final class Trash {
             }
         }
         progress.file(path.toString(), 0);
-        Files.delete(path);
+        delete(path);
+    }
+
+    /** Files.delete that also removes a read-only file on Windows (on Unix such a file is deletable too). */
+    public static void delete(final @NotNull Path path) throws IOException {
+        try {
+            Files.delete(path);
+        } catch (final AccessDeniedException e) {
+            if (!clearReadOnly(path)) {
+                throw e;
+            }
+            Files.delete(path);
+        }
+    }
+
+    public static boolean deleteIfExists(final @NotNull Path path) throws IOException {
+        try {
+            return Files.deleteIfExists(path);
+        } catch (final AccessDeniedException e) {
+            if (!clearReadOnly(path)) {
+                throw e;
+            }
+
+            return Files.deleteIfExists(path);
+        }
+    }
+
+    private static boolean clearReadOnly(final @NotNull Path path) {
+        final DosFileAttributeView dos = Files.getFileAttributeView(path, DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        if (dos == null) {
+            return false;
+        }
+        try {
+            if (!dos.readAttributes().isReadOnly()) {
+                return false;
+            }
+            dos.setReadOnly(false);
+
+            return true;
+        } catch (final IOException e) {
+            return false;
+        }
     }
 
     private static boolean moveToXdgTrash(final @NotNull Path path) throws IOException {

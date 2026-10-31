@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Native distribution: the executable, the JDK libraries it loads (AWT, fonts, JPEG, color management) and lib/fontconfig.bfc -->
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
+    <id>windows-amd64</id>
+    <formats>
+        <format>zip</format>
+    </formats>
+    <includeBaseDirectory>true</includeBaseDirectory>
+    <baseDirectory>${project.build.finalName}</baseDirectory>
+    <fileSets>
+        <fileSet>
+            <directory>${project.build.directory}</directory>
+            <outputDirectory/>
+            <includes>
+                <include>tcm.exe</include>
+                <include>*.dll</include>
+            </includes>
+            <!-- JavaSound: not used -->
+            <excludes>
+                <exclude>jsound.dll</exclude>
+            </excludes>
+        </fileSet>
+        <!-- without it FlatLaf fails with "Fontconfig head is null": Windows has no system fontconfig -->
+        <fileSet>
+            <directory>${project.build.directory}/lib</directory>
+            <outputDirectory>lib</outputDirectory>
+            <includes>
+                <include>fontconfig.bfc</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+</assembly>

@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -73,7 +75,38 @@ public final class ConsoleWindow {
     }
 
     public static @NotNull List<String> shellCommand(final @NotNull String command) {
-        return WINDOWS ? List.of("cmd.exe", "/c", command) : List.of("/bin/sh", "-c", command);
+        // cmd strips the outer quotes of /c, so a quoted program path followed by arguments needs one more pair
+        return WINDOWS ? List.of("cmd.exe", "/c", "\"" + command + "\"") : List.of("/bin/sh", "-c", command);
+    }
+
+    /** Encoding of the child's output and input: the OEM code page of the console on Windows (chcp), UTF-8 elsewhere. */
+    public static @NotNull Charset consoleCharset() {
+        return WINDOWS ? ConsoleCharset.WINDOWS : StandardCharsets.UTF_8;
+    }
+
+    private static final class ConsoleCharset {
+
+        static final Charset WINDOWS = detect();
+
+        private static @NotNull Charset detect() {
+            try {
+                final Process p = new ProcessBuilder("cmd.exe", "/c", "chcp").redirectErrorStream(true).start();
+                final String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1).trim();
+                p.waitFor();
+                final Matcher m = Pattern.compile("(\\d+)$").matcher(out);
+                if (m.find()) {
+                    final int page = Integer.parseInt(m.group(1));
+
+                    return page == 65001 ? StandardCharsets.UTF_8 : Charset.forName("cp" + page);
+                }
+            } catch (final IOException | RuntimeException e) {
+                // no chcp or an unknown code page — the system encoding below
+            } catch (final InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            return Charset.defaultCharset();
+        }
     }
 
     private void start(final @NotNull String command, final @NotNull Path dir) {
@@ -92,7 +125,7 @@ public final class ConsoleWindow {
     }
 
     private void pump(final @NotNull Process p) {
-        final Charset cs = WINDOWS ? Charset.defaultCharset() : StandardCharsets.UTF_8;
+        final Charset cs = consoleCharset();
         try (InputStream in = p.getInputStream(); Reader r = new InputStreamReader(in, cs)) {
             final char[] buf = new char[4096];
             int n;
@@ -122,7 +155,7 @@ public final class ConsoleWindow {
         append(line + "\n");
         try {
             final OutputStream os = p.getOutputStream();
-            os.write((line + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
+            os.write((line + System.lineSeparator()).getBytes(consoleCharset()));
             os.flush();
         } catch (final IOException e) {
             append("[stdin closed]\n");
