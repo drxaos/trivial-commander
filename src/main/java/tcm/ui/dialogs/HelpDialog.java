@@ -24,7 +24,8 @@ public final class HelpDialog {
     private static final String[][] KEYS = {
         {"File panels", ""},
         {"F1", "This help"},
-        {"F2 / Ctrl+R", "Refresh panel; in search results — return to the directory"},
+        {"F2", "Rename the file under the cursor (as Shift+F6); on [..] — refresh; in search results — return to the directory"},
+        {"Ctrl+R", "Refresh panel"},
         {"F3 / Shift+F3", "View selected files / only the file under the cursor (on a directory — enter it)"},
         {"Alt+F3", "Open with the associated program"},
         {"F4 / Shift+F4", "Edit / create a text file and edit it"},

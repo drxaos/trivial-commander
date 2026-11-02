@@ -49,7 +49,7 @@ The Linux archives are skipped on Windows.
 - **Auto-refresh**: panels are re-read when focus returns to the window and at most once per second on changes
   in the local directories open in them (WatchService) — e.g. you can see a downloading file grow.
   Cursor, marks, scroll position and in-panel rename are not disturbed; search results are not re-read.
-- **File operations**: copy (`F5`, `Shift+F5` — into the same directory), move (`F6`), in-panel rename (`Shift+F6`),
+- **File operations**: copy (`F5`, `Shift+F5` — into the same directory), move (`F6`), in-panel rename (`Shift+F6` or `F2` on a name),
   multi-rename (`Ctrl+M`), directory (`F7`, `Shift+F7` — in the other panel), delete to trash/permanently (`F8`/`Shift+F8`, `Del`/`Shift+Del`),
   symbolic links (`Ctrl+Shift+F5`), file clipboard (`Ctrl+C`/`Ctrl+X`/`Ctrl+V`, compatible with the system one).
   Operation queue (`F2 Queue` in the dialog), progress with Pause / Background / Cancel, conflicts Overwrite / All / Skip / Skip all

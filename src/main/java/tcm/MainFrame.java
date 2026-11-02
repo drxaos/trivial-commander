@@ -748,7 +748,16 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
 
     private void registerFileKeys() {
         key("F1", () -> HelpDialog.show(this));
-        key("F2", () -> activePanel.getCurrentTab().reread());
+        key("F2", () -> {
+            // on a file/directory name — rename as Shift+F6; on [..] and in search results — refresh
+            final PanelTab tab = activePanel.getCurrentTab();
+            final VFile cursor = tab.getCursorFile();
+            if (tab.isFeed() || cursor == null || cursor.isParentLink()) {
+                tab.reread();
+            } else {
+                commands.rename();
+            }
+        });
         key("ctrl R", () -> activePanel.getCurrentTab().reread());
         key("F3", () -> commands.view(false));
         key("shift F3", () -> commands.view(true));

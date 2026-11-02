@@ -53,6 +53,8 @@ public final class FileTable extends JTable {
     private static final int ROW_HEIGHT = 22;
     /** Empty strip below the last row: shows that the list has ended, and gives room to invoke the directory menu. */
     private static final int BOTTOM_GAP = 30;
+    /** Inner horizontal padding of the rename field and its minimum gap from the panel edges. */
+    private static final int RENAME_PAD = 2;
 
     @Getter
     private final @NotNull FileTableModel fileModel;
@@ -224,9 +226,14 @@ public final class FileTable extends JTable {
         final VFile f = fileModel.getFile(row);
         final JTextField field = new JTextField(f.getName());
         field.putClientProperty(NO_GLOBAL_KEYS, Boolean.TRUE);
-        field.setBorder(BorderFactory.createLineBorder(UIManager.getColor("Component.accentColor")));
+        field.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(UIManager.getColor("Component.accentColor")),
+            BorderFactory.createEmptyBorder(0, RENAME_PAD, 0, RENAME_PAD)));
+        // the field text starts where the name text is drawn (after the icon), not at the panel edge
         final Rectangle rect = getCellRect(row, 0, true);
-        rect.width = Math.max(rect.width, 200);
+        final int indent = Math.max(RENAME_PAD, nameTextIndent(row) - 1 - RENAME_PAD);
+        rect.x += indent;
+        rect.width = Math.max(rect.width - indent - RENAME_PAD, 200);
         field.setBounds(rect);
         selectBaseName(field, f);
         final Runnable cancel = () -> {
@@ -270,6 +277,17 @@ public final class FileTable extends JTable {
         stopRename();
         requestFocusInWindow();
         commit.accept(name, move);
+    }
+
+    /** X offset of the name text inside the name cell: renderer inset + icon + gap. */
+    private int nameTextIndent(final int row) {
+        final Component c = prepareRenderer(getCellRenderer(row, 0), row, 0);
+        if (!(c instanceof JLabel label)) {
+            return 0;
+        }
+        final Icon icon = label.getIcon();
+
+        return label.getInsets().left + (icon == null ? 0 : icon.getIconWidth() + label.getIconTextGap());
     }
 
     private static void selectBaseName(final @NotNull JTextField field, final @NotNull VFile f) {
