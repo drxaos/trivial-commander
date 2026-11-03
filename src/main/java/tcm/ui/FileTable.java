@@ -405,13 +405,13 @@ public final class FileTable extends JTable {
 
         private @NotNull Icon iconFor(final @NotNull VFile f) {
             if (thumbs && f.isImage()) {
-                final ImageIcon thumb = ThumbCache.get(f, FileTable.this::repaint);
+                final ImageIcon thumb = ThumbCache.get(f, FileTable.this);
                 if (thumb != null) {
                     return thumb;
                 }
             }
 
-            return Icons.forFile(f);
+            return Icons.forFile(f, FileTable.this);
         }
     }
 }

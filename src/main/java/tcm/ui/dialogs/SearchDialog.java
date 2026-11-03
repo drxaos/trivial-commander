@@ -248,7 +248,7 @@ public final class SearchDialog extends JDialog {
                 super.getListCellRendererComponent(list, value, index, selected, focus);
                 final VFile f = (VFile) value;
                 setText(f.isDirectory() ? "[" + f.getLocation() + "]" : f.getLocation());
-                setIcon(Icons.forFile(f));
+                setIcon(Icons.forFile(f, list));
 
                 return this;
             }

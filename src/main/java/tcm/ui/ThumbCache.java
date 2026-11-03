@@ -1,11 +1,13 @@
 package tcm.ui;
 
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
+import java.awt.Component;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
-import java.util.HashSet;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -38,7 +40,8 @@ public final class ThumbCache {
             return size() > MAX_ENTRIES;
         }
     };
-    private static final Set<String> PENDING = new HashSet<>();
+    /** Components waiting for a thumbnail: both panels may show the same directory. */
+    private static final Map<String, Set<Component>> PENDING = new HashMap<>();
     private static final ExecutorService LOADER = Executors.newFixedThreadPool(2, r -> {
         final Thread t = new Thread(r, "thumb-loader");
         t.setDaemon(true);
@@ -49,26 +52,31 @@ public final class ThumbCache {
     private ThumbCache() {
     }
 
-    /** A ready thumbnail or null; on a miss starts loading and then calls onLoaded on the EDT. */
-    public static @Nullable ImageIcon get(final @NotNull VFile file, final @NotNull Runnable onLoaded) {
+    /** A ready thumbnail or null; on a miss starts loading and then repaints every component that asked for it. */
+    public static @Nullable ImageIcon get(final @NotNull VFile file, final @NotNull Component repaint) {
         final String key = file.getLocation() + "@" + file.getModified() + ":" + file.getSize();
         synchronized (CACHE) {
             final ImageIcon icon = CACHE.get(key);
             if (icon != null) {
                 return icon == FAILED ? null : icon;
             }
-            if (!PENDING.add(key)) {
+            final Set<Component> waiting = PENDING.get(key);
+            if (waiting != null) {
+                waiting.add(repaint);
+
                 return null;
             }
+            PENDING.put(key, new LinkedHashSet<>(List.of(repaint)));
         }
         LOADER.submit(() -> {
             final ImageIcon loaded = load(file);
+            final Set<Component> waiting;
             synchronized (CACHE) {
-                PENDING.remove(key);
+                waiting = PENDING.remove(key);
                 CACHE.put(key, loaded == null ? FAILED : loaded);
             }
-            if (loaded != null) {
-                SwingUtilities.invokeLater(onLoaded);
+            if (loaded != null && waiting != null) {
+                SwingUtilities.invokeLater(() -> waiting.forEach(Component::repaint));
             }
         });
 
@@ -86,25 +94,60 @@ public final class ThumbCache {
             }
 
             return new ImageIcon(scale(img, SIZE));
-        } catch (final Exception e) {
-            // corrupted or unsupported image — show the regular icon
+        } catch (final Exception | LinkageError e) {
+            // corrupted or unsupported image, or a raster type missing from the native image — show the regular icon
             return null;
         }
     }
 
+    /**
+     * Fits the image into box x box (never enlarges) by averaging the source pixels of each target pixel. No Graphics: the native
+     * image lacks java2d loops for the custom types ImageIO returns (3BYTE_BGR, palettes, 16-bit), and drawing them throws.
+     */
     public static @NotNull BufferedImage scale(final @NotNull BufferedImage img, final int box) {
-        final double k = Math.min((double) box / img.getWidth(), (double) box / img.getHeight());
-        final double factor = Math.min(k, 1.0);
-        final int w = Math.max(1, (int) Math.round(img.getWidth() * factor));
-        final int h = Math.max(1, (int) Math.round(img.getHeight() * factor));
+        final int sw = img.getWidth();
+        final int sh = img.getHeight();
+        final double k = Math.min(1.0, Math.min((double) box / sw, (double) box / sh));
+        final int w = Math.max(1, (int) Math.round(sw * k));
+        final int h = Math.max(1, (int) Math.round(sh * k));
         final BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        final Graphics2D g = out.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            g.drawImage(img, 0, 0, w, h, null);
-        } finally {
-            g.dispose();
+        // premultiplied sums, otherwise transparent pixels darken the edges
+        final long[] a = new long[w];
+        final long[] r = new long[w];
+        final long[] g = new long[w];
+        final long[] b = new long[w];
+        final int[] n = new int[w];
+        final int[] src = new int[sw];
+        final int[] dst = new int[w];
+        int ty = 0;
+        for (int y = 0; y < sh; y++) {
+            img.getRGB(0, y, sw, 1, src, 0, sw);
+            for (int x = 0; x < sw; x++) {
+                final int tx = (int) ((long) x * w / sw);
+                final int p = src[x];
+                final int pa = p >>> 24;
+                a[tx] += pa;
+                r[tx] += (long) ((p >> 16) & 0xFF) * pa;
+                g[tx] += (long) ((p >> 8) & 0xFF) * pa;
+                b[tx] += (long) (p & 0xFF) * pa;
+                n[tx]++;
+            }
+            final int next = y + 1 < sh ? (int) ((long) (y + 1) * h / sh) : h;
+            if (next != ty) {
+                for (int x = 0; x < w; x++) {
+                    dst[x] = a[x] == 0 ? 0 : (int) ((a[x] + n[x] / 2) / n[x]) << 24
+                        | (int) (r[x] / a[x]) << 16
+                        | (int) (g[x] / a[x]) << 8
+                        | (int) (b[x] / a[x]);
+                }
+                out.setRGB(0, ty, w, 1, dst, 0, w);
+                Arrays.fill(a, 0);
+                Arrays.fill(r, 0);
+                Arrays.fill(g, 0);
+                Arrays.fill(b, 0);
+                Arrays.fill(n, 0);
+                ty = next;
+            }
         }
 
         return out;

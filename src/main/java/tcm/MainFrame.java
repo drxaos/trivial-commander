@@ -77,6 +77,7 @@ import tcm.ui.Icons;
 import tcm.ui.LayoutSwitchKeys;
 import tcm.ui.PanelHost;
 import tcm.ui.PanelTab;
+import tcm.ui.SystemIcons;
 import tcm.ui.dialogs.HelpDialog;
 import tcm.ui.dialogs.TreeDialog;
 import tcm.util.Keys;
@@ -124,6 +125,8 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         super(APP_TITLE);
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setIconImage(appIcon());
+        // the MIME database and icon theme are read while the panels are being built
+        SystemIcons.preload();
         // tabs need the command line already at creation (key bindings)
         commandLine = new CommandLine(this, Settings.getList("cmd.history"));
         leftPanel = new FilePanel(this, Settings.getList("left.tabs"), Settings.getInt("left.tab", 0));

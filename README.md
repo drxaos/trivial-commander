@@ -41,6 +41,11 @@ The Linux archives are skipped on Windows.
 - **Two panels** with a Name / Ext / Size / Date / Attr table, sorting by clicking the header or `Ctrl+F3..F7`,
   brief/full view (`Ctrl+F1`/`Ctrl+F2`), thumbnails (`Ctrl+Shift+F1`), hidden files (`Ctrl+H`),
   filters (`Ctrl+F10` all, `Ctrl+F11` programs, `Ctrl+F12` custom mask), quick filter/search (`Ctrl+S`, `Ctrl+Alt+letter`).
+  File icons are the ones the system associates with the type: on Linux from the current icon theme by MIME type
+  (shared-mime-info, PNG and SVG icons; another theme — `-Dtcm.iconTheme=breeze`), on Windows from the shell,
+  on macOS from Launch Services (`java -jar` only: the jar manifest exports `sun.lwawt.macosx`). On Linux and macOS
+  the icons of `.exe`/`.dll`, `.ico`/`.cur` and `.AppImage` files are read from the files (an AppImage is not run: its icon
+  is taken from the squashfs image inside — gzip, xz or zstd). Directories and files without a system icon keep the built-in icons.
 - **Tabs** (`Ctrl+T`/`Ctrl+Shift+T` — new/background, `Ctrl+W`/`Ctrl+Shift+W` — close/others, `Ctrl+Tab`, list `Ctrl+Shift+A`),
   double click on empty space right of the tabs duplicates the current one, middle button (wheel) on a tab closes it; tabs in one row (at most 200 px wide,
   full path in the tooltip), the strip scrolls with the mouse wheel,

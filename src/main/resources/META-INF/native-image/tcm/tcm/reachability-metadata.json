@@ -2419,6 +2419,27 @@
       ]
     },
     {
+      "type": "sun.awt.image.ShortComponentRaster",
+      "jniAccessible": true,
+      "fields": [
+        {
+          "name": "data"
+        },
+        {
+          "name": "dataOffsets"
+        },
+        {
+          "name": "pixelStride"
+        },
+        {
+          "name": "scanlineStride"
+        },
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
       "type": "sun.awt.image.IntegerComponentRaster",
       "jniAccessible": true,
       "fields": [
@@ -4545,12 +4566,28 @@
     },
     {
       "type": "sun.awt.shell.Win32ShellFolderManager2",
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        }
-      ]
+      "jniAccessible": true,
+      "allDeclaredFields": true,
+      "allDeclaredMethods": true,
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "sun.awt.shell.Win32ShellFolder2",
+      "jniAccessible": true,
+      "allDeclaredFields": true,
+      "allDeclaredMethods": true,
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "sun.awt.shell.Win32ShellFolder2$KnownFolderDefinition",
+      "jniAccessible": true,
+      "allDeclaredFields": true,
+      "allDeclaredConstructors": true
+    },
+    {
+      "type": "sun.awt.shell.ShellFolderColumnInfo",
+      "jniAccessible": true,
+      "allDeclaredConstructors": true
     }
   ],
   "resources": [

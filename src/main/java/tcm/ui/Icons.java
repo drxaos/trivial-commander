@@ -60,6 +60,13 @@ public final class Icons {
     private Icons() {
     }
 
+    /** The system icon of the file type if there is one (repaints the component once it is loaded), otherwise our own. */
+    public static @NotNull Icon forFile(final @NotNull VFile file, final @NotNull Component repaint) {
+        final Icon system = SystemIcons.get(file, repaint);
+
+        return system != null ? system : forFile(file);
+    }
+
     public static @NotNull Icon forFile(final @NotNull VFile file) {
         if (file.isParentLink()) {
             return UP;
