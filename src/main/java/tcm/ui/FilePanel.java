@@ -349,13 +349,13 @@ public final class FilePanel extends JPanel {
         final JPanel nav = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         final JButton root = navButton("\\", "Go to root (Ctrl+\\)");
         root.addActionListener(e -> getCurrentTab().goRoot());
-        final JButton up = navButton("..", "Go to parent directory (Backspace)");
-        up.addActionListener(e -> getCurrentTab().goUp());
         final JButton home = navButton("~", "Go to home directory");
         home.addActionListener(e -> getCurrentTab().navigate(System.getProperty("user.home")));
+        final JButton up = navButton("..", "Go to parent directory (Backspace)");
+        up.addActionListener(e -> getCurrentTab().goUp());
         nav.add(root);
-        nav.add(up);
         nav.add(home);
+        nav.add(up);
         bar.add(nav, BorderLayout.EAST);
 
         return bar;

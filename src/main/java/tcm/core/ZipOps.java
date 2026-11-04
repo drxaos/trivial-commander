@@ -37,7 +37,7 @@ public final class ZipOps {
         }
         final Path target = archive.toAbsolutePath().normalize();
         Vfs.checkWritable(target);
-        final Path tmp = Files.createTempFile(target.getParent(), ".tcm-", ".tmp");
+        final Path tmp = Vfs.siblingTemp(target);
         try {
             try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(tmp), StandardCharsets.UTF_8)) {
                 final Set<String> added = new HashSet<>();

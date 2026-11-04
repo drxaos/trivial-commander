@@ -1,7 +1,6 @@
 package tcm.ui;
 
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -10,25 +9,22 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
-import javax.imageio.ImageIO;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * Icons of Windows files read without the Windows shell: the main icon of a PE file (exe, dll — the first RT_GROUP_ICON resource,
- * as Explorer shows it) and the best image of an .ico/.cur file. Images are PNG or DIB (1/4/8/16/24/32 bits with an AND mask).
+ * as Explorer shows it) and the best image of an .ico/.cur or .icns file (decoded by IconImages).
  */
 final class PeIcons {
 
     private static final int RT_ICON = 3;
     private static final int RT_GROUP_ICON = 14;
     private static final int MAX_ENTRIES = 4096;
-    private static final int MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-    private static final int MAX_DIM = 1024;
+    private static final int MAX_ICON_FILE = 16 * 1024 * 1024;
 
     private PeIcons() {
     }
@@ -44,28 +40,21 @@ final class PeIcons {
                 return readPe(ch, size);
             }
             final int type = u16(head, 2);
-            if (u16(head, 0) == 0 && (type == 1 || type == 2)) {
-                return readIco(ch, size);
+            if (u16(head, 0) == 0 && (type == 1 || type == 2) || head.get(0) == 'i' && head.get(1) == 'c' && head.get(2) == 'n'
+                && head.get(3) == 's') {
+                return readIcon(ch, size);
             }
 
             return null;
         }
     }
 
-    private static @Nullable BufferedImage readIco(final @NotNull FileChannel ch, final int size) throws IOException {
-        final int count = u16(at(ch, 0, 6), 4);
-        if (count == 0 || count > 256) {
+    private static @Nullable BufferedImage readIcon(final @NotNull FileChannel ch, final int size) throws IOException {
+        if (ch.size() > MAX_ICON_FILE) {
             return null;
         }
-        final ByteBuffer dir = at(ch, 6, 16 * count);
-        final List<Entry> entries = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            final int o = i * 16;
-            entries.add(new Entry(u8(dir, o), u8(dir, o + 2), u16(dir, o + 6), dir.getInt(o + 8), dir.getInt(o + 12)));
-        }
-        final Entry best = choose(entries, size);
 
-        return best == null ? null : decode(bytes(at(ch, best.ref & 0xFFFFFFFFL, best.bytes)));
+        return IconImages.decode(bytes(at(ch, 0, (int) ch.size())), size);
     }
 
     private static @Nullable BufferedImage readPe(final @NotNull FileChannel ch, final int size) throws IOException {
@@ -78,39 +67,22 @@ final class PeIcons {
             return null;
         }
         final int count = Math.min(u16(group, 4), (group.remaining() - 6) / 14);
-        final List<Entry> entries = new ArrayList<>();
+        final List<IconImages.Entry> entries = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             final int o = 6 + i * 14;
-            entries.add(new Entry(u8(group, o), u8(group, o + 2), u16(group, o + 6), group.getInt(o + 8), u16(group, o + 12)));
+            entries.add(new IconImages.Entry(u8(group, o), u8(group, o + 2), u16(group, o + 6), group.getInt(o + 8), u16(group, o + 12)));
         }
-        final Entry best = choose(entries, size);
+        final IconImages.Entry best = IconImages.choose(entries, size);
         if (best == null) {
             return null;
         }
-        final ByteBuffer image = res.byId(RT_ICON, best.ref);
+        final ByteBuffer image = res.byId(RT_ICON, best.ref());
 
-        return image == null ? null : decode(bytes(image));
-    }
-
-    /** The deepest color first, then the size: the smallest not below the target, otherwise the largest. */
-    private static @Nullable Entry choose(final @NotNull List<Entry> entries, final int size) {
-        return entries.stream()
-            .filter(e -> e.bytes > 0 && e.bytes <= MAX_IMAGE_BYTES)
-            .min(Comparator.<Entry>comparingInt(e -> -Math.min(e.bits(), 32))
-                .thenComparingInt(e -> e.width() >= size ? e.width() - size : 10_000 - e.width()))
-            .orElse(null);
-    }
-
-    private static @Nullable BufferedImage decode(final byte @NotNull [] data) throws IOException {
-        if (data.length > 8 && (data[0] & 0xFF) == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G') {
-            return ImageIO.read(new ByteArrayInputStream(data));
-        }
-
-        return Dib.decode(ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN));
+        return image == null ? null : IconImages.decodeImage(bytes(image));
     }
 
     private static @NotNull ByteBuffer at(final @NotNull FileChannel ch, final long pos, final int len) throws IOException {
-        if (pos < 0 || len < 0 || len > MAX_IMAGE_BYTES || pos + len > ch.size()) {
+        if (pos < 0 || len < 0 || len > MAX_ICON_FILE || pos + len > ch.size()) {
             throw new EOFException("outside the file");
         }
         final ByteBuffer buf = ByteBuffer.allocate(len).order(ByteOrder.LITTLE_ENDIAN);
@@ -136,36 +108,6 @@ final class PeIcons {
 
     private static int u16(final @NotNull ByteBuffer b, final int pos) {
         return b.getShort(pos) & 0xFFFF;
-    }
-
-    /** A directory entry: width 0 means 256; ref is the RT_ICON id in a PE file or the image offset in an .ico file. */
-    private static final class Entry {
-
-        private final int width;
-        private final int colors;
-        private final int bitCount;
-        private final int bytes;
-        private final int ref;
-
-        private Entry(final int width, final int colors, final int bitCount, final int bytes, final int ref) {
-            this.width = width;
-            this.colors = colors;
-            this.bitCount = bitCount;
-            this.bytes = bytes;
-            this.ref = ref;
-        }
-
-        private int width() {
-            return width == 0 ? 256 : width;
-        }
-
-        private int bits() {
-            if (bitCount != 0) {
-                return bitCount;
-            }
-
-            return colors == 0 ? 32 : 32 - Integer.numberOfLeadingZeros(colors - 1);
-        }
     }
 
     /** The resource tree of a PE file: type → name → language → data. */
@@ -286,116 +228,6 @@ final class PeIcons {
             }
 
             return -1;
-        }
-    }
-
-    /** A device-independent bitmap of an icon: the XOR image of half the stated height, then the 1-bit AND (transparency) mask. */
-    private static final class Dib {
-
-        private Dib() {
-        }
-
-        static @Nullable BufferedImage decode(final @NotNull ByteBuffer b) {
-            if (b.remaining() < 40) {
-                return null;
-            }
-            final int header = b.getInt(0);
-            final int w = b.getInt(4);
-            final int stated = b.getInt(8);
-            final int h = Math.abs(stated) / 2;
-            final int bpp = u16(b, 14);
-            final int compression = b.getInt(16);
-            if (w <= 0 || w > MAX_DIM || h <= 0 || h > MAX_DIM || header < 40 || compression != 0 && compression != 3) {
-                return null;
-            }
-            final int used = b.getInt(32);
-            final int paletteSize = bpp <= 8 ? (used > 0 && used <= 256 ? used : 1 << bpp) : 0;
-            // BI_BITFIELDS with the 40-byte header: three color masks follow it; standard masks are assumed
-            final int palette = header + (compression == 3 && header == 40 ? 12 : 0);
-            final int xor = palette + 4 * paletteSize;
-            final int xorStride = (w * bpp + 31) / 32 * 4;
-            final int and = xor + xorStride * h;
-            final int andStride = (w + 31) / 32 * 4;
-            if (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32 || (long) and > b.remaining()) {
-                return null;
-            }
-            final int[] pixels = pixels(b, w, h, bpp, palette, xor, xorStride);
-            applyMask(b, pixels, w, h, bpp, and, andStride);
-            final BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-            // rows are stored bottom up unless the height is negative
-            for (int y = 0; y < h; y++) {
-                img.setRGB(0, stated > 0 ? h - 1 - y : y, w, 1, pixels, y * w, w);
-            }
-
-            return img;
-        }
-
-        private static int @NotNull [] pixels(
-            final @NotNull ByteBuffer b,
-            final int w,
-            final int h,
-            final int bpp,
-            final int palette,
-            final int xor,
-            final int stride
-        ) {
-            final int[] result = new int[w * h];
-            for (int y = 0; y < h; y++) {
-                final int row = xor + y * stride;
-                for (int x = 0; x < w; x++) {
-                    result[y * w + x] = pixel(b, row, x, bpp, palette);
-                }
-            }
-
-            return result;
-        }
-
-        private static int pixel(final @NotNull ByteBuffer b, final int row, final int x, final int bpp, final int palette) {
-            switch (bpp) {
-                case 32:
-                    return b.getInt(row + x * 4);
-                case 24:
-                    return 0xFF000000 | u8(b, row + x * 3 + 2) << 16 | u8(b, row + x * 3 + 1) << 8 | u8(b, row + x * 3);
-                case 16: {
-                    final int v = u16(b, row + x * 2);
-
-                    return 0xFF000000 | (v >> 10 & 0x1F) * 255 / 31 << 16 | (v >> 5 & 0x1F) * 255 / 31 << 8 | (v & 0x1F) * 255 / 31;
-                }
-                default: {
-                    final int bit = x * bpp;
-                    final int index = u8(b, row + bit / 8) >> 8 - bpp - bit % 8 & (1 << bpp) - 1;
-                    final int pos = palette + index * 4;
-
-                    return pos + 4 <= b.limit() ? 0xFF000000 | b.getInt(pos) & 0xFFFFFF : 0;
-                }
-            }
-        }
-
-        /** 32-bit images carry alpha; older ones (and 32-bit ones with zero alpha everywhere) take it from the AND mask. */
-        private static void applyMask(
-            final @NotNull ByteBuffer b,
-            final int @NotNull [] pixels,
-            final int w,
-            final int h,
-            final int bpp,
-            final int and,
-            final int stride
-        ) {
-            if (bpp == 32) {
-                for (final int p : pixels) {
-                    if (p >>> 24 != 0) {
-                        return;
-                    }
-                }
-            }
-            final boolean hasMask = (long) and + (long) stride * h <= b.remaining();
-            for (int y = 0; y < h; y++) {
-                for (int x = 0; x < w; x++) {
-                    final boolean transparent = hasMask && (u8(b, and + y * stride + x / 8) >> 7 - x % 8 & 1) != 0;
-                    final int i = y * w + x;
-                    pixels[i] = transparent ? 0 : 0xFF000000 | pixels[i] & 0xFFFFFF;
-                }
-            }
         }
     }
 }

@@ -24,7 +24,8 @@ import org.jetbrains.annotations.Nullable;
 import lombok.Getter;
 
 /**
- * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR). Directories not explicitly present in the archive are reconstructed from file paths.
+ * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg).
+ * Directories not explicitly present in the archive are reconstructed from file paths.
  */
 public final class ArchiveIndex {
 
@@ -43,8 +44,11 @@ public final class ArchiveIndex {
     private final long archiveSize;
     private final Map<String, VFile> entries = new HashMap<>();
     private final Map<String, List<VFile>> children = new HashMap<>();
-    /** TAR: kept open for the index's whole lifetime — entries are read by offset without re-parsing headers. */
+    /** TAR, ISO, DMG: kept open for the index's whole lifetime — entries are read by offset without re-parsing headers. */
     private @Nullable ArchiveReader tar;
+    /** A ZIP with encrypted entries: read via commons-compress and read-only. */
+    @Getter
+    private boolean encrypted;
 
     private ArchiveIndex(
         final @NotNull Path archive,
@@ -68,20 +72,21 @@ public final class ArchiveIndex {
         if (format == null) {
             throw new IOException("Not an archive or unsupported format: " + archive.getFileName());
         }
-        switch (format) {
-            case ZIP:
-                return loadZip(archive, modified, size);
-            case RAR:
-                final ArchiveIndex rar = new ArchiveIndex(archive, format, StandardCharsets.UTF_8, modified, size);
-                RarArchives.load(rar);
-
-                return rar;
-            default:
-                final ArchiveIndex index = new ArchiveIndex(archive, format, StandardCharsets.UTF_8, modified, size);
-                TarArchives.load(index);
-
-                return index;
+        if (format == ArchiveFormat.ZIP) {
+            return loadZip(archive, modified, size);
         }
+        final ArchiveIndex index = new ArchiveIndex(archive, format, StandardCharsets.UTF_8, modified, size);
+        switch (format) {
+            case RAR -> RarArchives.load(index);
+            case SEVEN_ZIP -> SevenZipArchives.load(index);
+            case ISO -> IsoArchives.load(index);
+            case SQUASHFS -> SquashArchives.load(index);
+            case PAK -> PakArchives.load(index);
+            case DMG -> DmgArchives.load(index);
+            default -> TarArchives.load(index);
+        }
+
+        return index;
     }
 
     private static @NotNull ArchiveIndex loadZip(final @NotNull Path archive, final long modified, final long size) throws IOException {
@@ -92,9 +97,29 @@ public final class ArchiveIndex {
         try {
             return loadZip(archive, StandardCharsets.UTF_8, modified, size);
         } catch (final IllegalArgumentException | ZipException e) {
+            if (e instanceof ZipException z && EncryptedZip.isEncryptionError(z)) {
+                return loadEncryptedZip(archive, modified, size);
+            }
             // entry names not in UTF-8 — old archives write them in a DOS code page; JDK 21 reports this with ZipException
             // already on open, so real archive corruption will surface on the second attempt
             return loadZip(archive, legacyCharset(archive), modified, size);
+        }
+    }
+
+    /** A ZIP with encrypted entries: listed without a password, entries are decrypted when read; such an archive is read-only. */
+    private static @NotNull ArchiveIndex loadEncryptedZip(final @NotNull Path archive, final long modified, final long size) throws IOException {
+        try (org.apache.commons.compress.archivers.zip.ZipFile zip = EncryptedZip.open(archive)) {
+            final List<org.apache.commons.compress.archivers.zip.ZipArchiveEntry> list = EncryptedZip.entries(zip);
+            final Charset charset = EncryptedZip.charset(list);
+            final ArchiveIndex index = new ArchiveIndex(archive, ArchiveFormat.ZIP, charset, modified, size);
+            index.encrypted = true;
+            final Map<String, String> attrs = ZipAttributes.read(archive, charset);
+            for (final org.apache.commons.compress.archivers.zip.ZipArchiveEntry e : list) {
+                final String name = EncryptedZip.name(e, charset);
+                index.add(name, e.isDirectory(), e.getSize(), e.getTime(), attrs.getOrDefault(entryName(name), ""));
+            }
+
+            return index;
         }
     }
 
@@ -104,22 +129,32 @@ public final class ArchiveIndex {
      * otherwise CP437.
      */
     private static @NotNull Charset legacyCharset(final @NotNull Path archive) throws IOException {
-        boolean cyrillic = false;
+        final List<String> names = new ArrayList<>();
         // ISO-8859-1 decodes any bytes one to one: this exposes the original bytes of the names
         try (ZipFile zip = new ZipFile(archive.toFile(), StandardCharsets.ISO_8859_1)) {
             final Enumeration<? extends ZipEntry> en = zip.entries();
             while (en.hasMoreElements()) {
-                for (final char c : en.nextElement().getName().toCharArray()) {
-                    if (c < 0x80 || c > 0xFF) {
-                        // ASCII or a name with the UTF-8 flag that is already decoded correctly
-                        continue;
-                    }
-                    if (c >= 0xB0 && c < 0xE0 || c > 0xF7) {
-                        // CP866 box-drawing characters: so these are not Russian names
-                        return LEGACY_CHARSET;
-                    }
-                    cyrillic |= c >= 0xE0 && c <= 0xEF && c != 0xE1;
+                names.add(en.nextElement().getName());
+            }
+        }
+
+        return legacyCharset(names);
+    }
+
+    /** The same by the names decoded as ISO-8859-1 (one char per byte). */
+    static @NotNull Charset legacyCharset(final @NotNull List<String> latin1Names) {
+        boolean cyrillic = false;
+        for (final String name : latin1Names) {
+            for (final char c : name.toCharArray()) {
+                if (c < 0x80 || c > 0xFF) {
+                    // ASCII or a name with the UTF-8 flag that is already decoded correctly
+                    continue;
                 }
+                if (c >= 0xB0 && c < 0xE0 || c > 0xF7) {
+                    // CP866 box-drawing characters: so these are not Russian names
+                    return LEGACY_CHARSET;
+                }
+                cyrillic |= c >= 0xE0 && c <= 0xEF && c != 0xE1;
             }
         }
 
@@ -213,16 +248,21 @@ public final class ArchiveIndex {
         return entries.size() - 1;
     }
 
+    /** Only a plain ZIP/JAR can be modified. */
+    public boolean isWritable() {
+        return format.isWritable() && !encrypted;
+    }
+
     /** Opens the archive for reading entries; must be closed. */
     public @NotNull ArchiveReader openReader() throws IOException {
-        switch (format) {
-            case ZIP:
-                return zipReader();
-            case RAR:
-                return RarArchives.reader(archive);
-            default:
-                return tarReader();
-        }
+        return switch (format) {
+            case ZIP -> encrypted ? EncryptedZip.reader(archive, charset) : zipReader();
+            case RAR -> RarArchives.reader(archive);
+            case SEVEN_ZIP -> SevenZipArchives.reader(archive);
+            case SQUASHFS -> SquashArchives.reader(archive);
+            case PAK -> PakArchives.reader(archive);
+            default -> tarReader();
+        };
     }
 
     /** Releases the open TAR and the temporary unpacked copy; called when the index is outdated. */

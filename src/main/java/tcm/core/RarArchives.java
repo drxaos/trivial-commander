@@ -15,12 +15,15 @@ import java.util.Map;
 import org.jetbrains.annotations.NotNull;
 
 import com.github.junrar.Archive;
+import com.github.junrar.UnrarCallback;
+import com.github.junrar.exception.CrcErrorException;
 import com.github.junrar.exception.RarException;
 import com.github.junrar.rarfile.FileHeader;
 import com.github.junrar.rarfile.HostSystem;
 
 /**
  * RAR (via junrar) — read only. junrar picks up multi-volume archives by volume names itself.
+ * Encrypted entries and encrypted headers (the listing itself) ask for the password via {@link Passwords}.
  */
 final class RarArchives {
 
@@ -68,8 +71,15 @@ final class RarArchives {
                 if (fh == null) {
                     throw new FileNotFoundException(archive + VFile.ARCHIVE_SEPARATOR + entry);
                 }
+                if (!fh.isEncrypted()) {
+                    return extract(rar, fh);
+                }
 
-                return extract(rar, fh);
+                return Passwords.withPassword(archive, password -> {
+                    rar.setPassword(password);
+
+                    return extract(rar, fh);
+                });
             }
 
             @Override
@@ -114,14 +124,35 @@ final class RarArchives {
     private static void extractTo(final @NotNull Archive rar, final @NotNull FileHeader fh, final @NotNull OutputStream out) throws IOException {
         try {
             rar.extractFile(fh, out);
+        } catch (final com.github.junrar.exception.WrongPasswordException e) {
+            throw new WrongPasswordException(fh.getFileName());
+        } catch (final CrcErrorException e) {
+            // RAR4 keeps no password check: a wrong password shows up only as a CRC error
+            if (fh.isEncrypted()) {
+                throw new WrongPasswordException(fh.getFileName());
+            }
+            throw new IOException(fh.getFileName() + ": " + describe(e), e);
         } catch (final RarException e) {
             throw new IOException(fh.getFileName() + ": " + describe(e), e);
         }
     }
 
+    /** Encrypted headers: even the listing needs the password. */
     private static @NotNull Archive open(final @NotNull Path archive) throws IOException {
         try {
             return new Archive(archive.toFile());
+        } catch (final com.github.junrar.exception.WrongPasswordException e) {
+            return Passwords.withPassword(archive, password -> open(archive, password));
+        } catch (final RarException e) {
+            throw new IOException("Cannot open RAR archive " + archive.getFileName() + ": " + describe(e), e);
+        }
+    }
+
+    private static @NotNull Archive open(final @NotNull Path archive, final @NotNull String password) throws IOException {
+        try {
+            return new Archive(archive.toFile(), (UnrarCallback) null, password);
+        } catch (final com.github.junrar.exception.WrongPasswordException e) {
+            throw new WrongPasswordException(String.valueOf(archive.getFileName()));
         } catch (final RarException e) {
             throw new IOException("Cannot open RAR archive " + archive.getFileName() + ": " + describe(e), e);
         }

@@ -4,6 +4,7 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileStore;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -11,6 +12,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.NotDirectoryException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.DosFileAttributes;
 import java.nio.file.attribute.PosixFileAttributes;
@@ -29,11 +31,11 @@ import org.jetbrains.annotations.Nullable;
 import tcm.util.TextUtil;
 
 /**
- * Virtual FS: uniform access to local directories and archive contents (ZIP/JAR, TAR, RAR).
+ * Virtual FS: uniform access to local directories and archive contents (ZIP/JAR, TAR, RAR, 7z, ISO, squashfs/AppImage).
  */
 public final class Vfs {
 
-    public static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "bmp", "wbmp");
+    public static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "bmp", "wbmp", "ico", "icns");
 
     private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     private static final Map<Path, ArchiveIndex> ARCHIVES = new ConcurrentHashMap<>();
@@ -197,14 +199,48 @@ public final class Vfs {
         return index(archive).openReader();
     }
 
+    /**
+     * Temporary file next to the target of an atomic rewrite (archives). It gets the target's permissions, a new file — the usual ones
+     * (umask), not the 0600 of Files.createTempFile, which the archive would keep after the swap.
+     */
+    public static @NotNull Path siblingTemp(final @NotNull Path target) throws IOException {
+        final Path dir = target.toAbsolutePath().getParent();
+        for (int i = 0; ; i++) {
+            final Path tmp = dir.resolve(".tcm-" + Long.toHexString(System.nanoTime()) + "-" + i + ".tmp");
+            try {
+                Files.newOutputStream(tmp, StandardOpenOption.CREATE_NEW).close();
+            } catch (final FileAlreadyExistsException e) {
+                continue;
+            }
+            if (POSIX && Files.exists(target)) {
+                try {
+                    Files.setPosixFilePermissions(tmp, Files.getPosixFilePermissions(target));
+                } catch (final IOException e) {
+                    // the archive is still written, only with the default permissions
+                }
+            }
+
+            return tmp;
+        }
+    }
+
     /** Only ZIP/JAR can be modified; for other formats a write operation is rejected before it starts. */
     public static void checkWritable(final @NotNull Path archive) throws IOException {
         if (NESTED.containsKey(archive.toAbsolutePath().normalize())) {
             throw new IOException("Archive inside an archive is read-only: " + archive.getFileName());
         }
-        final ArchiveFormat format = Files.exists(archive) && Files.size(archive) > 0
-            ? index(archive).getFormat()
-            : ArchiveFormat.of(String.valueOf(archive.getFileName()));
+        if (Files.exists(archive) && Files.size(archive) > 0) {
+            final ArchiveIndex index = index(archive);
+            if (index.isEncrypted()) {
+                throw new IOException("Encrypted archive is read-only: " + archive.getFileName());
+            }
+            if (!index.isWritable()) {
+                throw new IOException("Archive is read-only (only ZIP/JAR can be modified): " + archive.getFileName());
+            }
+
+            return;
+        }
+        final ArchiveFormat format = ArchiveFormat.of(String.valueOf(archive.getFileName()));
         if (format != null && !format.isWritable()) {
             throw new IOException("Archive is read-only (only ZIP/JAR can be modified): " + archive.getFileName());
         }

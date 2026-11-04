@@ -27,6 +27,7 @@ import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.JTableHeader;
@@ -55,6 +56,8 @@ public final class FileTable extends JTable {
     private static final int BOTTOM_GAP = 30;
     /** Inner horizontal padding of the rename field and its minimum gap from the panel edges. */
     private static final int RENAME_PAD = 2;
+    /** The full name of a cut-off name appears after the mouse rests on it this long. */
+    private static final int NAME_TIP_DELAY = 1000;
 
     @Getter
     private final @NotNull FileTableModel fileModel;
@@ -104,6 +107,49 @@ public final class FileTable extends JTable {
             getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(key), "none");
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(key), "none");
         }
+        installNameTips();
+    }
+
+    /** The delay is shared by all tooltips: it is set while the mouse is over the table and restored when it leaves. */
+    private void installNameTips() {
+        ToolTipManager.sharedInstance().registerComponent(this);
+        addMouseListener(new MouseAdapter() {
+            private int saved = -1;
+
+            @Override
+            public void mouseEntered(final MouseEvent e) {
+                final ToolTipManager tips = ToolTipManager.sharedInstance();
+                if (saved < 0) {
+                    saved = tips.getInitialDelay();
+                }
+                tips.setInitialDelay(NAME_TIP_DELAY);
+            }
+
+            @Override
+            public void mouseExited(final MouseEvent e) {
+                if (saved >= 0) {
+                    ToolTipManager.sharedInstance().setInitialDelay(saved);
+                    saved = -1;
+                }
+            }
+        });
+    }
+
+    /** Tooltip only over a name that does not fit into its column: the full name. */
+    @Override
+    public String getToolTipText(final MouseEvent e) {
+        final int row = rowAtPoint(e.getPoint());
+        final int column = columnAtPoint(e.getPoint());
+        if (row < 0 || column < 0 || isRenaming() || convertColumnIndexToModel(column) != FileTableModel.COL_NAME) {
+            return null;
+        }
+        final Component c = prepareRenderer(getCellRenderer(row, column), row, column);
+        if (!(c instanceof JLabel label) || label.getPreferredSize().width <= getCellRect(row, column, false).width) {
+            return null;
+        }
+        final VFile f = fileModel.getFile(row);
+
+        return f.isParentLink() ? null : fileModel.isFeedMode() ? fileModel.feedName(f) : f.getName();
     }
 
     public void setThumbs(final boolean value) {

@@ -343,7 +343,7 @@ public final class SystemIcons {
      */
     private static final class EmbeddedProvider implements Provider {
 
-        private static final Set<String> PE = Set.of("exe", "dll", "cpl", "scr", "ocx", "ico", "cur");
+        private static final Set<String> PE = Set.of("exe", "dll", "cpl", "scr", "ocx", "ico", "cur", "icns");
         private static final String APPIMAGE = "appimage";
         private static final String PREFIX = "file:";
 

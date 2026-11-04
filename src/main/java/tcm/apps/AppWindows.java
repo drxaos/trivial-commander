@@ -146,6 +146,15 @@ public final class AppWindows {
         }
     }
 
+    /** An already open window is shown again: restored if minimized, raised and focused. */
+    public static void bringToFront(final @NotNull Window w) {
+        if (w instanceof Frame f && (f.getExtendedState() & Frame.ICONIFIED) != 0) {
+            f.setExtendedState(f.getExtendedState() & ~Frame.ICONIFIED);
+        }
+        w.toFront();
+        w.requestFocus();
+    }
+
     /** F11: maximize/restore. */
     public static void toggleMaximized(final @NotNull Window w) {
         if (w instanceof Frame) {

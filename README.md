@@ -41,10 +41,13 @@ The Linux archives are skipped on Windows.
 - **Two panels** with a Name / Ext / Size / Date / Attr table, sorting by clicking the header or `Ctrl+F3..F7`,
   brief/full view (`Ctrl+F1`/`Ctrl+F2`), thumbnails (`Ctrl+Shift+F1`), hidden files (`Ctrl+H`),
   filters (`Ctrl+F10` all, `Ctrl+F11` programs, `Ctrl+F12` custom mask), quick filter/search (`Ctrl+S`, `Ctrl+Alt+letter`).
+  A name cut off by the column width shows in full in a tooltip after the mouse rests on it for 1 s.
+  Each tab remembers the scroll position of the directories (and archives) it leaves: coming back up restores it,
+  scrolling only if the directory just left is out of view; without a remembered position that directory is put in the middle of the panel.
   File icons are the ones the system associates with the type: on Linux from the current icon theme by MIME type
   (shared-mime-info, PNG and SVG icons; another theme — `-Dtcm.iconTheme=breeze`), on Windows from the shell,
   on macOS from Launch Services (`java -jar` only: the jar manifest exports `sun.lwawt.macosx`). On Linux and macOS
-  the icons of `.exe`/`.dll`, `.ico`/`.cur` and `.AppImage` files are read from the files (an AppImage is not run: its icon
+  the icons of `.exe`/`.dll`, `.ico`/`.cur`/`.icns` and `.AppImage` files are read from the files (an AppImage is not run: its icon
   is taken from the squashfs image inside — gzip, xz or zstd). Directories and files without a system icon keep the built-in icons.
 - **Tabs** (`Ctrl+T`/`Ctrl+Shift+T` — new/background, `Ctrl+W`/`Ctrl+Shift+W` — close/others, `Ctrl+Tab`, list `Ctrl+Shift+A`),
   double click on empty space right of the tabs duplicates the current one, middle button (wheel) on a tab closes it; tabs in one row (at most 200 px wide,
@@ -61,12 +64,23 @@ The Linux archives are skipped on Windows.
   (in the overwrite dialog `F3`/`Shift+F3` — view, `Ctrl+F3` — compare).
 - **ZIP and JAR as directories**: enter with Enter, copy/move/delete/rename inside the archive (the archive is rewritten
   atomically), packing (`Alt+F5`, `Alt+Shift+F5` — with deletion), unpacking (`Alt+F9`/`Alt+F6`), CRC test (`Alt+Shift+F9`).
+  Packing also creates TAR, TAR.GZ, TAR.BZ2 and TAR.XZ (packer buttons in the dialog or the extension of the name); such an archive
+  cannot be appended to, so an existing one is replaced after confirmation.
   Names without the UTF-8 flag are read as DOS: CP866 if they are Russian, otherwise CP437.
-- **TAR, TAR.GZ/TGZ, TAR.BZ2, TAR.XZ, RAR (RAR4/RAR5)** — read only: browsing contents, viewing files,
-  copying from the archive, unpacking, testing. A compressed TAR is unpacked into a temporary `.tar` once
+- **TAR, TAR.GZ/TGZ, TAR.BZ2, TAR.XZ, RAR (RAR4/RAR5), 7z, ISO, AppImage, squashfs, Chromium/Electron `.pak` and Apple `.dmg`** — read only:
+  browsing contents, viewing files, copying from the archive, unpacking, testing. `.pak` resources have only numeric IDs, so they are
+  named by ID plus an extension guessed from the content (`1234.png`, `.gz`, `.br`, `.txt`...); aliases are shown as copies. ISO 9660 names come from Rock Ridge (long names, permissions), otherwise
+  from Joliet; UDF-only images are not supported. An AppImage is browsed without running it: `Enter` on an executable `.AppImage`
+  runs it, `Ctrl+PgDn` opens it as an archive. Symbolic links in ISO/squashfs/DMG are shown as files.
+  A `.dmg` (UDIF; zlib, bzip2, ADC, LZMA chunks — not LZFSE) shows the files of its APFS volumes (unencrypted; files compressed by
+  macOS with zlib are unpacked); an image with HFS+ or another file system lists its partitions as raw `.img` files. A compressed TAR is unpacked into a temporary `.tar` once
   (as in TC). `Ctrl+PgDn` opens any file as an archive: the format is detected by signature (`.docx`, `.apk`, `.cbr`...).
   `Enter`/double click on a file without an associated program does the same.
   Entry names with `..` are trimmed, so unpacking cannot escape the target directory.
+- **Encrypted archives**: ZIP (WinZip AES and the traditional ZipCrypto), RAR (encrypted files and encrypted headers)
+  and 7z (encrypted contents and headers). The password is asked in a dialog when the archive is entered (encrypted headers)
+  or a file is viewed/unpacked; a wrong one is asked again. An accepted password is remembered for the archive until exit.
+  An encrypted ZIP is read-only.
 - **Archive attributes**: Unix permissions (`rwxr-xr-x`) or DOS flags (`rahs`) stored in ZIP, TAR and RAR are shown in the Attr
   column and set on unpacked files (Unix permissions on Windows and DOS flags on Unix — only "read-only").
 - **Archives inside archives** open with Enter/`Ctrl+PgDn` as well (read only): the nested archive is unpacked into a temporary file,
@@ -74,15 +88,17 @@ The Linux archives are skipped on Windows.
 - **Search** (`Alt+F7`): name mask or RegEx, text (substring/RegEx, case, "NOT containing"), depth, archives,
   size/date/type on the Advanced tab, search in results (`F2`), result history (`Alt+←/→`); "Feed to listbox", "Go to file".
   Flat list of subdirectories — `Ctrl+B`.
-- **Viewer** (`F3`; on a directory `F3` enters it, as Enter does): text (UTF-8/BOM, fallback ISO-8859-1; `A`/`S` — 1251/866), binary, hex, HTML;
+- **Viewer** (`F3`; on a directory `F3` enters it, as Enter does; a file already shown in a viewer brings that window forward): text (UTF-8/BOM, fallback ISO-8859-1; `A`/`S` — 1251/866), binary, hex, HTML;
   search `F7`/`F3`, switching between files `N`/`P`. Quick view `Ctrl+Q` (in the other panel) and `Ctrl+Shift+Q` (window).
   Menus as in TC: File (Save as, Reload `F2`, Close), Edit (Copy, Select all, Find `F7`, Find next `F5`),
   Options (modes `1`–`7`, Markdown `8`, JSON `9`, ANSI `A`, ASCII `S`, other encoding, proportional font `V`, wrap `W`,
   cursor `F6`),
   Image, Help (`F1`). Edit and Options are unavailable for images, Image — for text.
+  Images: PNG, JPEG, GIF, BMP, WBMP, ICO/CUR and ICNS (the largest image of the icon; JPEG 2000 elements of ICNS are skipped).
   Markdown (CommonMark and GFM tables) is shown rendered, `.md` — right away; raw HTML is shown as text,
   images from the network are not loaded, http/https links open in the browser.
   JSON `9` is shown indented (pretty-print); parsing is lenient, so truncated or broken JSON is formatted too.
+  `.json` files open in JSON mode right away, `.html`/`.htm` — in HTML mode `5`.
   The mouse wheel rolled with the wheel pressed scrolls 5 times more lines.
   Reading and converting the file (decoding, hex, markup) runs in the background: the main window does not wait, and a closed viewer
   (and editor) window cancels loading.
@@ -116,7 +132,8 @@ The Linux archives are skipped on Windows.
   the modifier eaten by the switch is restored from the presses of the keys themselves (`LayoutSwitchKeys`).
 - **Editor** (`F4`, `Shift+F4` — new file, the name under the cursor is prefilled in the prompt): saving with `F2`/`Ctrl+S`
   in the original encoding, including into an archive; undo, search, `Ctrl+G`. Line numbers as in the viewer;
-  a file with too wide lines (see the viewer) is opened with word wrap.
+  a file with too wide lines (see the viewer) is opened with word wrap. `End` on a line with trailing whitespace
+  alternates between the end of the line and the end of its text. `F4` on a file that is already being edited brings that editor forward.
   Menus File (Save, Save as, Reload, Close) and Edit (Copy, Select all, Find, Find next).
 - **Content comparison** (`Ctrl+Shift+F3`): two files side by side, LCS diff, differences in red, `Alt+↑/↓`, synchronized scrolling,
   two-line panel `F9`. Comparing panel file lists — `Shift+F2`.

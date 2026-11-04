@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -88,7 +89,8 @@ public final class ThumbCache {
             return null;
         }
         try (InputStream in = Vfs.openInput(file)) {
-            final BufferedImage img = ImageIO.read(in);
+            final String ext = file.getExtension().toLowerCase(Locale.ROOT);
+            final BufferedImage img = ext.equals("ico") || ext.equals("icns") ? IconImages.decode(in.readAllBytes(), SIZE) : ImageIO.read(in);
             if (img == null) {
                 return null;
             }

@@ -82,7 +82,7 @@ public final class SearchDialog extends JDialog {
     private final JComboBox<String> searchFor = new JComboBox<>(new String[] {"*", "*.txt", "*.java", "*.jpg;*.png"});
     private final JTextField searchIn = new JTextField(40);
     private final JCheckBox nameRegex = new JCheckBox("RegEx (name)");
-    private final JCheckBox archives = new JCheckBox("Search archives (ZIP/JAR)");
+    private final JCheckBox archives = new JCheckBox("Search archives");
     private final JComboBox<String> depth = new JComboBox<>(DEPTHS);
     private final JCheckBox findText = new JCheckBox("Find text:");
     private final JTextField text = new JTextField(30);

@@ -45,6 +45,23 @@ public final class FileAttrs {
         return new String(s);
     }
 
+    /** Unix permission bits for an archive being written: from the Attr text, DOS "read-only" removes write permissions. */
+    static int mode(final @NotNull String attrs, final boolean directory) {
+        if (attrs.length() == POSIX_LENGTH) {
+            int bits = 0;
+            for (int i = 0; i < POSIX_LENGTH; i++) {
+                if (attrs.charAt(i) != '-') {
+                    bits |= 1 << POSIX_LENGTH - 1 - i;
+                }
+            }
+
+            return bits;
+        }
+        final int mode = directory ? 0755 : 0644;
+
+        return attrs.length() == DOS_LENGTH && attrs.charAt(0) == 'r' ? mode & ~0222 : mode;
+    }
+
     /** DOS/Windows attribute byte. */
     static @NotNull String dos(final int attrs) {
         return dos((attrs & DOS_READ_ONLY) != 0, (attrs & DOS_ARCHIVE) != 0, (attrs & DOS_HIDDEN) != 0, (attrs & DOS_SYSTEM) != 0);

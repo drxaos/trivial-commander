@@ -25,7 +25,8 @@ import tcm.core.Vfs;
 
 /**
  * Archive testing: every entry is read in full. ZIP is checked against CRC32 (ZipFile does not verify the checksum itself),
- * compressed TAR — by the gzip/bzip2/xz checksum while reading the stream, RAR — by the CRC check in junrar.
+ * compressed TAR — by the gzip/bzip2/xz checksum while reading the stream, RAR — by the CRC check in junrar, 7z and encrypted ZIP
+ * entries — by their readers (CRC, AES authentication code), ISO and squashfs — by reading (they keep no checksums).
  */
 public final class TestJob extends Job {
 
@@ -54,12 +55,12 @@ public final class TestJob extends Job {
         try {
             final ArchiveFormat format = ArchiveFormat.forFile(archive.getHostPath());
             final int entries;
-            if (format == ArchiveFormat.ZIP) {
+            if (format == ArchiveFormat.ZIP && !Vfs.index(archive.getHostPath()).isEncrypted()) {
                 entries = testZip(archive, ctx);
-            } else if (format == ArchiveFormat.RAR) {
-                entries = testEntries(archive, ctx);
-            } else if (format != null) {
+            } else if (format != null && format.isTar()) {
                 entries = testTar(archive, format, ctx);
+            } else if (format != null) {
+                entries = testEntries(archive, ctx);
             } else {
                 return "ERROR  " + archive.getLocation() + ": not an archive";
             }

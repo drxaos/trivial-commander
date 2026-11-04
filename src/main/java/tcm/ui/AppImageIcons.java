@@ -3,8 +3,6 @@ package tcm.ui;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -34,7 +32,7 @@ final class AppImageIcons {
 
     static @Nullable BufferedImage read(final @NotNull Path file, final int size) throws IOException {
         try (FileChannel ch = FileChannel.open(file, StandardOpenOption.READ)) {
-            final SquashFs fs = SquashFs.open(ch, squashfsOffset(ch));
+            final SquashFs fs = SquashFs.open(ch, SquashFs.imageOffset(ch));
             if (fs == null) {
                 return null;
             }
@@ -45,25 +43,6 @@ final class AppImageIcons {
 
             return data == null ? null : decode(data, file, size);
         }
-    }
-
-    /** The end of the ELF section header table, or -1 if this is not a little-endian ELF file. */
-    private static long squashfsOffset(final @NotNull FileChannel ch) throws IOException {
-        if (ch.size() < 64) {
-            return -1;
-        }
-        final ByteBuffer h = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
-        while (h.hasRemaining() && ch.read(h, h.position()) >= 0) {
-            // reads the header fully
-        }
-        if (h.getInt(0) != 0x464C457F || h.get(5) != 1) {
-            return -1;
-        }
-        if (h.get(4) == 2) {
-            return h.getLong(0x28) + (long) (h.getShort(0x3A) & 0xFFFF) * (h.getShort(0x3C) & 0xFFFF);
-        }
-
-        return (h.getInt(0x20) & 0xFFFFFFFFL) + (long) (h.getShort(0x2E) & 0xFFFF) * (h.getShort(0x30) & 0xFFFF);
     }
 
     /** No .DirIcon: the icon named by the root .desktop file, as a PNG or SVG next to it. */

@@ -383,7 +383,7 @@ public final class FileCommands {
             }
         }
         if (!inArchive && archives.isEmpty()) {
-            JOptionPane.showMessageDialog(frame, "No ZIP/JAR archives selected.", "Unpack", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(frame, "No archives selected.", "Unpack", JOptionPane.INFORMATION_MESSAGE);
 
             return;
         }
@@ -425,7 +425,7 @@ public final class FileCommands {
             }
         }
         if (archives.isEmpty()) {
-            JOptionPane.showMessageDialog(frame, "No ZIP/JAR archives selected.", "Test archives", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(frame, "No archives selected.", "Test archives", JOptionPane.INFORMATION_MESSAGE);
 
             return;
         }

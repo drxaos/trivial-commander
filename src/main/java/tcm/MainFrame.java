@@ -79,6 +79,7 @@ import tcm.ui.PanelHost;
 import tcm.ui.PanelTab;
 import tcm.ui.SystemIcons;
 import tcm.ui.dialogs.HelpDialog;
+import tcm.ui.dialogs.PasswordDialog;
 import tcm.ui.dialogs.TreeDialog;
 import tcm.util.Keys;
 import tcm.util.Settings;
@@ -150,6 +151,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         getContentPane().add(bottom, BorderLayout.SOUTH);
         registerGlobalKeys();
         AppWindows.setHelpHandler(w -> HelpDialog.show(w, HelpDialog.VIEWER));
+        PasswordDialog.install(this);
         AppWindows.setIcons(Icons.windowImages(Icons.FILE), Icons.windowImages(Icons.IMAGE));
         // before GlobalKeys: global shortcuts must already see the corrected modifiers
         LayoutSwitchKeys.install();

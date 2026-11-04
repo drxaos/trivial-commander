@@ -27,9 +27,9 @@ import org.tukaani.xz.XZInputStream;
 import tcm.util.Zstd;
 
 /**
- * A read-only squashfs 4.0 image (the file system of an AppImage) at an offset in a file: directory listings and whole files
- * by path, symbolic links followed. Compression: gzip, xz, lzma, zstd. Sizes are bounded, so a damaged image cannot make
- * it allocate much.
+ * A read-only squashfs 4.0 image (the file system of an AppImage) at an offset in a file: directory listings, the whole tree,
+ * whole files and file streams by path, symbolic links followed. Compression: gzip, xz, lzma, zstd. Sizes are bounded, so
+ * a damaged image cannot make it allocate much.
  */
 public final class SquashFs {
 
@@ -46,6 +46,15 @@ public final class SquashFs {
     private static final int EXT_DIR = 8;
     private static final int EXT_FILE = 9;
     private static final int EXT_SYMLINK = 10;
+    private static final long MAX_FILE = 1L << 40;
+    private static final int MAX_ENTRIES = 2_000_000;
+    private static final int MAX_DEPTH = 256;
+
+    /** One entry of {@link #walk}: a symbolic link to a file is reported as that file; to anything else — with size 0. */
+    public interface Visitor {
+
+        void entry(@NotNull String path, boolean directory, long size, long modified, int mode) throws IOException;
+    }
 
     private final FileChannel ch;
     private final long base;
@@ -56,6 +65,8 @@ public final class SquashFs {
     private final long directoryTable;
     private final long fragmentTable;
     private final Map<Long, byte[]> metadataCache = new HashMap<>();
+    private int lastFragmentIndex = -1;
+    private byte @Nullable [] lastFragment;
 
     private SquashFs(final @NotNull FileChannel ch, final long base, final @NotNull ByteBuffer sb) {
         this.ch = ch;
@@ -82,6 +93,76 @@ public final class SquashFs {
         return new SquashFs(ch, offset, sb);
     }
 
+    /**
+     * Where the image starts in a file: 0 for a bare squashfs image, after the ELF section header table for an AppImage (type 2);
+     * -1 — neither.
+     */
+    public static long imageOffset(final @NotNull FileChannel ch) throws IOException {
+        if (ch.size() < 64) {
+            return -1;
+        }
+        final ByteBuffer h = read(ch, 0, 64);
+        if (h.getInt(0) == MAGIC) {
+            return 0;
+        }
+        if (h.getInt(0) != 0x464C457F || h.get(5) != 1) {
+            return -1;
+        }
+        if (h.get(4) == 2) {
+            return h.getLong(0x28) + (long) (h.getShort(0x3A) & 0xFFFF) * (h.getShort(0x3C) & 0xFFFF);
+        }
+
+        return (h.getInt(0x20) & 0xFFFFFFFFL) + (long) (h.getShort(0x2E) & 0xFFFF) * (h.getShort(0x30) & 0xFFFF);
+    }
+
+    /** All entries of the image, depth-first; paths without a leading "/". */
+    public void walk(final @NotNull Visitor visitor) throws IOException {
+        walk(inode(rootInode), "", visitor, new int[1], 0);
+    }
+
+    private void walk(final @NotNull Inode dir, final @NotNull String path, final @NotNull Visitor visitor, final int @NotNull [] count,
+        final int depth) throws IOException {
+        if (depth > MAX_DEPTH) {
+            throw new IOException("squashfs directories nested too deep");
+        }
+        for (final Map.Entry<String, Long> e : entries(dir).entrySet()) {
+            if (++count[0] > MAX_ENTRIES) {
+                throw new IOException("too many squashfs entries");
+            }
+            final String child = path.isEmpty() ? e.getKey() : path + "/" + e.getKey();
+            final Inode inode = inode(e.getValue());
+            if (inode.isDirectory()) {
+                visitor.entry(child, true, 0, inode.modified, inode.mode);
+                walk(inode, child, visitor, count, depth + 1);
+            } else if (inode.target != null) {
+                final Inode target = resolveQuietly(child);
+                final long size = target != null && target.isFile() ? target.size : 0;
+                visitor.entry(child, false, size, inode.modified, inode.mode);
+            } else {
+                visitor.entry(child, false, inode.isFile() ? inode.size : 0, inode.modified, inode.mode);
+            }
+        }
+    }
+
+    private @Nullable Inode resolveQuietly(final @NotNull String path) {
+        try {
+            return resolve(path);
+        } catch (final IOException e) {
+            // a broken link: shown with size 0
+            return null;
+        }
+    }
+
+    /** Stream of the regular file at the path (links followed); null — no such file. Blocks are decompressed as they are read. */
+    public @Nullable InputStream open(final @NotNull String path) throws IOException {
+        final Inode file = resolve(path);
+        if (file == null) {
+            return null;
+        }
+
+        return file.isFile() ? new FileStream(file) : InputStream.nullInputStream();
+    }
+
     /** Names in the directory at the path (null if it is not a directory). */
     public @Nullable List<String> list(final @NotNull String path) throws IOException {
         final Inode dir = resolve(path);
@@ -92,7 +173,7 @@ public final class SquashFs {
     /** Contents of the regular file at the path, or null if there is none or it is larger than maxSize. */
     public byte @Nullable [] readFile(final @NotNull String path, final int maxSize) throws IOException {
         final Inode file = resolve(path);
-        if (file == null || file.type != FILE && file.type != EXT_FILE || file.size > maxSize) {
+        if (file == null || !file.isFile() || file.size > maxSize) {
             return null;
         }
 
@@ -180,7 +261,10 @@ public final class SquashFs {
     private @NotNull Inode inode(final long ref) throws IOException {
         final Metadata in = new Metadata(inodeTable, ref >>> 16, (int) (ref & 0xFFFF));
         final Inode inode = new Inode(in.u16());
-        in.bytes(14);
+        inode.mode = in.u16();
+        in.u32();
+        inode.modified = (in.u32() & 0xFFFFFFFFL) * 1000;
+        in.u32();
         switch (inode.type) {
             case DIR -> {
                 inode.dirBlock = in.u32() & 0xFFFFFFFFL;
@@ -230,7 +314,7 @@ public final class SquashFs {
     }
 
     private int @NotNull [] blockSizes(final @NotNull Metadata in, final @NotNull Inode inode) throws IOException {
-        if (inode.size < 0 || inode.size > Integer.MAX_VALUE) {
+        if (inode.size < 0 || inode.size > MAX_FILE) {
             throw new IOException("squashfs file too large");
         }
         final long full = inode.fragment == NO_FRAGMENT ? (inode.size + blockSize - 1) / blockSize : inode.size / blockSize;
@@ -242,38 +326,32 @@ public final class SquashFs {
         return result;
     }
 
-    private byte @NotNull [] contents(final @NotNull Inode file) throws IOException {
-        final byte[] result = new byte[(int) file.size];
-        int pos = 0;
-        long disk = base + file.blocksStart;
-        for (final int word : file.blockSizes) {
-            final int length = word & (UNCOMPRESSED_BLOCK - 1);
-            final int want = Math.min(blockSize, result.length - pos);
-            if (length != 0) {
-                final byte[] raw = bytes(read(ch, disk, length));
-                final byte[] block = (word & UNCOMPRESSED_BLOCK) != 0 ? raw : decompress(raw, blockSize);
-                System.arraycopy(block, 0, result, pos, Math.min(want, block.length));
-                disk += length;
-            }
-            // a zero length is a sparse block: zeros, already there
-            pos += want;
+    /** A data block of a file: zero length is a sparse block of zeros. */
+    private byte @NotNull [] dataBlock(final int word, final long disk, final int want) throws IOException {
+        final int length = word & (UNCOMPRESSED_BLOCK - 1);
+        if (length == 0) {
+            return new byte[want];
         }
-        if (pos < result.length) {
-            final byte[] fragment = fragment(file.fragment);
-            final int length = result.length - pos;
-            if (file.fragmentOffset < 0 || file.fragmentOffset + length > fragment.length) {
-                throw new IOException("corrupted squashfs fragment");
-            }
-            System.arraycopy(fragment, file.fragmentOffset, result, pos, length);
-        }
+        final byte[] raw = bytes(read(ch, disk, length));
+        final byte[] block = (word & UNCOMPRESSED_BLOCK) != 0 ? raw : decompress(raw, blockSize);
 
-        return result;
+        return block.length == want ? block : Arrays.copyOf(block, want);
+    }
+
+    private byte @NotNull [] contents(final @NotNull Inode file) throws IOException {
+        try (InputStream in = new FileStream(file)) {
+            return in.readAllBytes();
+        }
     }
 
     /** A fragment block: the fragment table is a list of pointers to metadata blocks of 16-byte entries, 512 per block. */
     private byte @NotNull [] fragment(final int index) throws IOException {
         if (index < 0) {
             throw new IOException("corrupted squashfs fragment index");
+        }
+        // small files of a directory usually share a fragment block: the last one is kept
+        if (index == lastFragmentIndex && lastFragment != null) {
+            return lastFragment;
         }
         final long pointer = read(ch, base + fragmentTable + 8L * (index / 512), 8).getLong(0);
         final Metadata in = new Metadata(0, pointer, 0);
@@ -282,8 +360,11 @@ public final class SquashFs {
         final int word = in.u32();
         final int length = word & (UNCOMPRESSED_BLOCK - 1);
         final byte[] raw = bytes(read(ch, base + start, length));
+        final byte[] block = (word & UNCOMPRESSED_BLOCK) != 0 ? raw : decompress(raw, blockSize);
+        lastFragmentIndex = index;
+        lastFragment = block;
 
-        return (word & UNCOMPRESSED_BLOCK) != 0 ? raw : decompress(raw, blockSize);
+        return block;
     }
 
     private byte @NotNull [] metadataBlock(final long pos) throws IOException {
@@ -364,9 +445,72 @@ public final class SquashFs {
         return result;
     }
 
+    /** File data decompressed block by block while it is read. */
+    private final class FileStream extends InputStream {
+
+        private final @NotNull Inode file;
+        private int block;
+        private long disk;
+        private long remaining;
+        private byte[] current = new byte[0];
+        private int pos;
+
+        private FileStream(final @NotNull Inode file) {
+            this.file = file;
+            this.disk = base + file.blocksStart;
+            this.remaining = file.size;
+        }
+
+        @Override
+        public int read() throws IOException {
+            final byte[] one = new byte[1];
+
+            return read(one, 0, 1) < 0 ? -1 : one[0] & 0xFF;
+        }
+
+        @Override
+        public int read(final byte @NotNull [] b, final int off, final int len) throws IOException {
+            if (len == 0) {
+                return 0;
+            }
+            if (pos >= current.length && !next()) {
+                return -1;
+            }
+            final int n = Math.min(len, current.length - pos);
+            System.arraycopy(current, pos, b, off, n);
+            pos += n;
+
+            return n;
+        }
+
+        private boolean next() throws IOException {
+            if (remaining <= 0) {
+                return false;
+            }
+            final int want = (int) Math.min(blockSize, remaining);
+            if (block < file.blockSizes.length) {
+                final int word = file.blockSizes[block++];
+                current = dataBlock(word, disk, want);
+                disk += word & (UNCOMPRESSED_BLOCK - 1);
+            } else {
+                final byte[] fragment = fragment(file.fragment);
+                if (file.fragmentOffset < 0 || file.fragmentOffset + want > fragment.length) {
+                    throw new IOException("corrupted squashfs fragment");
+                }
+                current = Arrays.copyOfRange(fragment, file.fragmentOffset, file.fragmentOffset + want);
+            }
+            pos = 0;
+            remaining -= want;
+
+            return true;
+        }
+    }
+
     private static final class Inode {
 
         private final int type;
+        private int mode;
+        private long modified;
         private long size;
         private long dirBlock;
         private int dirOffset;
@@ -382,6 +526,10 @@ public final class SquashFs {
 
         private boolean isDirectory() {
             return type == DIR || type == EXT_DIR;
+        }
+
+        private boolean isFile() {
+            return type == FILE || type == EXT_FILE;
         }
     }
 

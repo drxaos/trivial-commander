@@ -3,15 +3,19 @@ package tcm.apps;
 import java.awt.BorderLayout;
 import java.awt.Font;
 import java.awt.Window;
+import java.awt.event.ActionEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 
+import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
@@ -27,6 +31,7 @@ import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultEditorKit;
 import javax.swing.text.PlainDocument;
 import javax.swing.undo.UndoManager;
 
@@ -49,6 +54,8 @@ import tcm.util.TextUtil;
 public final class EditorWindow {
 
     private static final int TAB_SIZE = 4;
+    /** Open editors: F4 on a file that is already being edited brings its window forward instead of opening a second one. */
+    private static final List<EditorWindow> OPEN = new ArrayList<>();
 
     private final @NotNull Window window;
     private final JTextArea area = new JTextArea();
@@ -99,11 +106,20 @@ public final class EditorWindow {
         setCloseHandler();
         // a window closed during reading cancels it
         AppWindows.onClosed(window, this::cancelLoading);
+        AppWindows.onClosed(window, () -> OPEN.remove(this));
+        OPEN.add(this);
         window.setVisible(true);
         load();
     }
 
     public static void open(final @Nullable Window owner, final @NotNull VFile file, final @Nullable Runnable onSaved) {
+        for (final EditorWindow w : OPEN) {
+            if (w.file.equals(file)) {
+                AppWindows.bringToFront(w.window);
+
+                return;
+            }
+        }
         new EditorWindow(owner, file, onSaved);
     }
 
@@ -201,6 +217,46 @@ public final class EditorWindow {
                 undo.redo();
             }
         });
+        final Action end = area.getActionMap().get(DefaultEditorKit.endLineAction);
+        final Action selectEnd = area.getActionMap().get(DefaultEditorKit.selectionEndLineAction);
+        Keys.bind(area, JComponent.WHEN_FOCUSED, "END", () -> lineEnd(false, end));
+        Keys.bind(area, JComponent.WHEN_FOCUSED, "shift END", () -> lineEnd(true, selectEnd));
+    }
+
+    /**
+     * End on a line with trailing whitespace (spaces, tabs) alternates between the end of the line and the end of its visible text;
+     * on other lines it is the standard End.
+     */
+    private void lineEnd(final boolean select, final @Nullable Action standard) {
+        try {
+            final int pos = area.getCaretPosition();
+            final int line = area.getLineOfOffset(pos);
+            final int start = area.getLineStartOffset(line);
+            final String text = area.getText(start, area.getLineEndOffset(line) - start);
+            int lineEnd = text.length();
+            while (lineEnd > 0 && (text.charAt(lineEnd - 1) == '\n' || text.charAt(lineEnd - 1) == '\r')) {
+                lineEnd--;
+            }
+            int textEnd = lineEnd;
+            while (textEnd > 0 && Character.isWhitespace(text.charAt(textEnd - 1))) {
+                textEnd--;
+            }
+            if (textEnd == lineEnd) {
+                if (standard != null) {
+                    standard.actionPerformed(new ActionEvent(area, ActionEvent.ACTION_PERFORMED, null));
+                }
+
+                return;
+            }
+            final int target = start + (pos == start + lineEnd ? textEnd : lineEnd);
+            if (select) {
+                area.moveCaretPosition(target);
+            } else {
+                area.setCaretPosition(target);
+            }
+        } catch (final BadLocationException e) {
+            // the caret is always inside the document
+        }
     }
 
     /** The editor has only File and Edit; item keys work without the menu too. */

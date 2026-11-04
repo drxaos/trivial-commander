@@ -7,6 +7,9 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Window;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
@@ -24,13 +27,15 @@ import org.jetbrains.annotations.Nullable;
 import lombok.Getter;
 
 /**
- * Packing: archive name, ZIP/JAR format, recursion, moving into the archive.
+ * Packing: archive name, format (ZIP/JAR or TAR, TAR.GZ, TAR.BZ2, TAR.XZ), recursion, moving into the archive.
  */
 public final class PackDialog extends JDialog {
 
     private final JTextField archive = new JTextField(48);
-    private final JRadioButton zip = new JRadioButton("ZIP", true);
-    private final JRadioButton jar = new JRadioButton("JAR");
+    /** Packer buttons and the extensions they set; the first one is selected for an unknown extension. */
+    private static final String[] EXTENSIONS = {"zip", "jar", "tar", "tar.gz", "tar.bz2", "tar.xz"};
+
+    private final List<JRadioButton> packers = new ArrayList<>();
     private final JCheckBox recursive = new JCheckBox("Recursively pack subdirectories", true);
     private final JCheckBox move = new JCheckBox("Move to archive");
     private @Nullable Result result;
@@ -66,12 +71,17 @@ public final class PackDialog extends JDialog {
         final JPanel packer = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         packer.add(new JLabel("Packer:"));
         final ButtonGroup group = new ButtonGroup();
-        group.add(zip);
-        group.add(jar);
-        packer.add(zip);
-        packer.add(jar);
-        zip.addActionListener(e -> switchExtension("zip"));
-        jar.addActionListener(e -> switchExtension("jar"));
+        final String suffix = archiveSuffix(path);
+        for (final String ext : EXTENSIONS) {
+            final JRadioButton b = new JRadioButton(ext.toUpperCase(Locale.ROOT), ("." + ext).equals(suffix));
+            b.addActionListener(e -> switchExtension(ext));
+            group.add(b);
+            packer.add(b);
+            packers.add(b);
+        }
+        if (group.getSelection() == null) {
+            packers.get(0).setSelected(true);
+        }
         content.add(packer, c);
         content.add(recursive, c);
         content.add(move, c);
@@ -114,17 +124,39 @@ public final class PackDialog extends JDialog {
 
     private void switchExtension(final @NotNull String ext) {
         final String text = archive.getText();
-        final int dot = text.lastIndexOf('.');
-        final int slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
-        archive.setText((dot > slash ? text.substring(0, dot) : text) + "." + ext);
+        archive.setText(text.substring(0, baseNameEnd(text)) + "." + ext);
         selectBaseName();
     }
 
     private void selectBaseName() {
         final String text = archive.getText();
         final int slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
+        archive.select(slash + 1, baseNameEnd(text));
+    }
+
+    /** End of the name without the archive extension: a double one (".tar.gz") is removed whole. */
+    private static int baseNameEnd(final @NotNull String text) {
+        final String suffix = archiveSuffix(text);
+        if (suffix != null) {
+            return text.length() - suffix.length();
+        }
         final int dot = text.lastIndexOf('.');
-        archive.select(slash + 1, dot > slash ? dot : text.length());
+        final int slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
+
+        return dot > slash + 1 ? dot : text.length();
+    }
+
+    private static @Nullable String archiveSuffix(final @NotNull String text) {
+        final String lower = text.toLowerCase(Locale.ROOT);
+        String best = null;
+        for (final String ext : EXTENSIONS) {
+            final String suffix = "." + ext;
+            if (lower.endsWith(suffix) && (best == null || suffix.length() > best.length())) {
+                best = suffix;
+            }
+        }
+
+        return best;
     }
 
     private void close(final boolean queued) {

@@ -1,5 +1,6 @@
 package tcm.apps;
 
+import java.awt.Dialog;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.ComponentAdapter;
@@ -25,6 +26,9 @@ import tcm.util.Keys;
  */
 public final class ViewerWindow {
 
+    /** Open viewers: F3 on a file that is already shown brings its window forward instead of opening a second one. */
+    private static final List<ViewerWindow> OPEN = new ArrayList<>();
+
     private final @NotNull Window window;
     private final @NotNull ViewerPanel viewer = new ViewerPanel();
     private @NotNull List<VFile> files;
@@ -42,6 +46,8 @@ public final class ViewerWindow {
         viewer.setImageNavigator(this::stepImage);
         // a closed window must not keep reading and converting the file
         AppWindows.onClosed(window, viewer::cancel);
+        AppWindows.onClosed(window, () -> OPEN.remove(this));
+        OPEN.add(this);
         final JComponent root = AppWindows.container(window).getRootPane();
         Keys.bindWindow(root, "ESCAPE", this::close);
         Keys.bindWindow(root, "F10", this::close);
@@ -67,9 +73,20 @@ public final class ViewerWindow {
 
     public static void open(final @Nullable Window owner, final @NotNull List<VFile> files, final int index,
         final @Nullable Consumer<VFile> onEdit) {
-        if (!files.isEmpty()) {
-            new ViewerWindow(owner, files, Math.max(0, Math.min(index, files.size() - 1)), onEdit);
+        if (files.isEmpty()) {
+            return;
         }
+        final int start = Math.max(0, Math.min(index, files.size() - 1));
+        // from a modal dialog a viewer of its own is opened: other windows are blocked by the dialog
+        final boolean modalOwner = owner instanceof Dialog d && d.isModal();
+        for (final ViewerWindow w : OPEN) {
+            if (!modalOwner && w.files.get(w.index).equals(files.get(start))) {
+                AppWindows.bringToFront(w.window);
+
+                return;
+            }
+        }
+        new ViewerWindow(owner, files, start, onEdit);
     }
 
     private void show() {

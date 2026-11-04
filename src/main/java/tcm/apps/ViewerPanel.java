@@ -67,6 +67,7 @@ import lombok.Getter;
 import tcm.core.TreeStats;
 import tcm.core.VFile;
 import tcm.core.Vfs;
+import tcm.ui.IconImages;
 import tcm.util.Keys;
 import tcm.util.TextUtil;
 
@@ -480,7 +481,7 @@ public final class ViewerPanel extends JPanel {
         }
         BufferedImage img = null;
         if (target.isImage()) {
-            img = ImageIO.read(new ByteArrayInputStream(bytes));
+            img = IconImages.isIcon(bytes) ? IconImages.decode(bytes, IconImages.LARGEST) : ImageIO.read(new ByteArrayInputStream(bytes));
         }
 
         return new Object[] {bytes, cut, img, null};
@@ -616,8 +617,8 @@ public final class ViewerPanel extends JPanel {
     }
 
     /**
-     * Without an explicit mode: an image, rendered Markdown, a dump of binary data (as text it is megabytes of control characters
-     * and random letters of all alphabets), otherwise text. A charset chosen by hand (6, 7, A, S) means text.
+     * Without an explicit mode: an image, rendered Markdown, pretty-printed JSON and HTML without tags (by extension), a dump
+     * of binary data (as text it is megabytes of control characters and random letters of all alphabets), otherwise text. A charset chosen by hand (6, 7, A, S) means text.
      */
     private @NotNull Mode autoMode(final @NotNull VFile f) {
         if (picture != null) {
@@ -625,6 +626,13 @@ public final class ViewerPanel extends JPanel {
         }
         if (isMarkdownFile(f)) {
             return Mode.MARKDOWN;
+        }
+        final String name = f.getName().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".json")) {
+            return Mode.JSON;
+        }
+        if (name.endsWith(".html") || name.endsWith(".htm")) {
+            return Mode.HTML;
         }
 
         return charset == null && TextUtil.looksBinary(data) ? Mode.BINARY : Mode.TEXT;

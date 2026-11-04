@@ -19,8 +19,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -54,6 +56,7 @@ import tcm.util.Masks;
 public final class PanelTab extends JPanel implements QuickBar.Listener {
 
     private static final int HISTORY_LIMIT = 100;
+    private static final int SCROLL_MEMORY_LIMIT = 500;
     private static final int FLAT_LIMIT = 200_000;
     private static final Set<String> PROGRAM_EXTENSIONS = Set.of("exe", "com", "bat", "cmd", "sh", "ps1", "msi", "appimage", "run", "bin");
 
@@ -66,6 +69,14 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     private final JLabel header = new JLabel();
     private final JLabel status = new JLabel(" ");
     private final QuickBar quickBar = new QuickBar(this);
+    private final JScrollPane scroll = new JScrollPane(table);
+    /** Scroll positions of the directories this tab has left (location → top of the view), restored on coming back. */
+    private final Map<String, Integer> scrollMemory = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(final Map.Entry<String, Integer> eldest) {
+            return size() > SCROLL_MEMORY_LIMIT;
+        }
+    };
     @Getter
     private final List<String> history = new ArrayList<>();
     private int historyPos = -1;
@@ -89,7 +100,6 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         this.owner = owner;
         this.dir = dir;
         add(createHeader(), BorderLayout.NORTH);
-        final JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         add(scroll, BorderLayout.CENTER);
         final JPanel bottom = new JPanel(new BorderLayout());
@@ -132,6 +142,9 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         if (!sameDir) {
             quickFilter = "";
             quickBar.close();
+            if (feed == null) {
+                scrollMemory.put(dir.getLocation(), table.getVisibleRect().y);
+            }
         }
         final List<VFile> visible = new ArrayList<>();
         if (parent != null) {
@@ -157,10 +170,36 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             record(target.getLocation());
         }
         final int row = keep == null ? -1 : model.indexOf(keep);
-        table.setCursorRow(row >= 0 ? row : sameDir ? keepRow : 0);
+        if (sameDir) {
+            table.setCursorRow(row >= 0 ? row : keepRow);
+        } else {
+            placeCursor(target, Math.max(row, 0), row >= 0);
+        }
         updateLabels();
 
         return true;
+    }
+
+    /**
+     * Cursor in a directory just opened. A remembered scroll position is restored, and the cursor row is scrolled into view only
+     * if it is outside it; without one a file selected by name (coming back from a subdirectory or an archive) is shown
+     * in the middle of the panel.
+     */
+    private void placeCursor(final @NotNull VFile target, final int row, final boolean selected) {
+        // the table must already have the height of the new listing, otherwise the position is clipped to the old one
+        scroll.validate();
+        final Integer remembered = scrollMemory.get(target.getLocation());
+        final int extent = scroll.getViewport().getExtentSize().height;
+        int y = 0;
+        if (remembered != null) {
+            y = remembered;
+        } else if (selected && row < table.getRowCount()) {
+            final Rectangle cell = table.getCellRect(row, 0, true);
+            y = cell.y + cell.height / 2 - extent / 2;
+        }
+        final int max = Math.max(0, table.getPreferredSize().height - extent);
+        scroll.getViewport().setViewPosition(new Point(0, Math.max(0, Math.min(y, max))));
+        table.setCursorRow(row);
     }
 
     /** Holds the nested archives of the current directory and releases those the tab has left. */
@@ -517,7 +556,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
             return;
         }
-        if (f.isArchiveFile()) {
+        if (f.isArchiveFile() && !isLaunchable(f)) {
             openArchive(f);
 
             return;
@@ -525,6 +564,11 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         if (!owner.getHost().openFile(f)) {
             openUnassociated(f);
         }
+    }
+
+    /** An executable AppImage is run by Enter (as a program), Ctrl+PgDn opens it as an archive. */
+    private static boolean isLaunchable(final @NotNull VFile f) {
+        return f.isLocal() && ArchiveFormat.isLaunchable(f.getName()) && f.getAttrs().length() == 9 && f.getAttrs().charAt(2) == 'x';
     }
 
     /** No associated program — like Ctrl+PgDn: a file with an archive signature is opened as an archive. */
