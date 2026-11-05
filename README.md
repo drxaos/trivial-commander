@@ -42,6 +42,9 @@ The Linux archives are skipped on Windows.
   brief/full view (`Ctrl+F1`/`Ctrl+F2`), thumbnails (`Ctrl+Shift+F1`), hidden files (`Ctrl+H`),
   filters (`Ctrl+F10` all, `Ctrl+F11` programs, `Ctrl+F12` custom mask), quick filter/search (`Ctrl+S`, `Ctrl+Alt+letter`).
   A name cut off by the column width shows in full in a tooltip after the mouse rests on it for 1 s.
+  The path above the table is a breadcrumb bar: every directory of the path (archives and directories inside them included)
+  is underlined under the mouse and opens on a click, with the cursor on the part of the path you came from;
+  a path too long for the panel loses its leading parts. Double click on the rest of the bar edits the path.
   Each tab remembers the scroll position of the directories (and archives) it leaves: coming back up restores it,
   scrolling only if the directory just left is out of view; without a remembered position that directory is put in the middle of the panel.
   File icons are the ones the system associates with the type: on Linux from the current icon theme by MIME type
@@ -89,7 +92,8 @@ The Linux archives are skipped on Windows.
   size/date/type on the Advanced tab, search in results (`F2`), result history (`Alt+←/→`); "Feed to listbox", "Go to file".
   Flat list of subdirectories — `Ctrl+B`.
 - **Viewer** (`F3`; on a directory `F3` enters it, as Enter does; a file already shown in a viewer brings that window forward): text (UTF-8/BOM, fallback ISO-8859-1; `A`/`S` — 1251/866), binary, hex, HTML;
-  search `F7`/`F3`, switching between files `N`/`P`. Quick view `Ctrl+Q` (in the other panel) and `Ctrl+Shift+Q` (window).
+  search `F7`/`F3`, switching between files `N`/`P`. `Ctrl+End` checks the file size first and re-reads a file that has changed
+  since it was loaded (a log being written), then goes to the end. Quick view `Ctrl+Q` (in the other panel) and `Ctrl+Shift+Q` (window).
   Menus as in TC: File (Save as, Reload `F2`, Close), Edit (Copy, Select all, Find `F7`, Find next `F5`),
   Options (modes `1`–`7`, Markdown `8`, JSON `9`, ANSI `A`, ASCII `S`, other encoding, proportional font `V`, wrap `W`,
   cursor `F6`),

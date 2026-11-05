@@ -12,8 +12,6 @@ import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,7 +64,24 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     private final @NotNull FileTableModel model = new FileTableModel();
     @Getter
     private final @NotNull FileTable table = new FileTable(model);
-    private final JLabel header = new JLabel();
+    private final PathBar header = new PathBar(new PathBar.Listener() {
+        @Override
+        public void crumbClicked(final @NotNull VFile target, final @Nullable String select) {
+            openCrumb(target, select);
+        }
+
+        @Override
+        public void plainClicked(final int count) {
+            if (count == 2) {
+                editPath();
+            } else {
+                focusTable();
+            }
+        }
+    });
+    /** Location the breadcrumbs were built for: the parent chain is not walked again on every filter change. */
+    private @Nullable String crumbsLocation;
+    private @NotNull List<PathBar.Piece> crumbs = List.of();
     private final JLabel status = new JLabel(" ");
     private final QuickBar quickBar = new QuickBar(this);
     private final JScrollPane scroll = new JScrollPane(table);
@@ -835,7 +850,13 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         final String mask = programsOnly ? "<programs>" : Masks.isAll(filter) ? "*" : filter;
         final String quick = quickFilter.isEmpty() ? "" : "  [filter: " + quickFilter + "]";
         final String sep = dir.isInArchive() ? (dir.getEntry().isEmpty() ? "" : "/") : (dir.getLocation().endsWith("/") ? "" : "/");
-        header.setText(feed != null ? feedTitle + " (" + feed.size() + ")" : Vfs.displayLocation(dir) + sep + mask + quick);
+        if (feed != null) {
+            header.setPieces(PathBar.plain(feedTitle + " (" + feed.size() + ")"));
+        } else {
+            final List<PathBar.Piece> pieces = new ArrayList<>(crumbs());
+            pieces.add(new PathBar.Piece(sep + mask + quick, null, null));
+            header.setPieces(pieces);
+        }
         status.setText(model.getSummary());
         owner.tabUpdated(this);
     }
@@ -909,19 +930,80 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         buttons.add(filterButton, BorderLayout.WEST);
         buttons.add(hotlist, BorderLayout.EAST);
         panel.add(buttons, BorderLayout.EAST);
-        header.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(final MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    editPath();
-                } else {
-                    focusTable();
-                }
-            }
-        });
         updateHeaderColors();
 
         return panel;
+    }
+
+    /**
+     * The path of the current directory as crumbs: each directory up the parent chain (archives and nested archives included)
+     * is the part of the shown path that its own location adds to its parent's.
+     */
+    private @NotNull List<PathBar.Piece> crumbs() {
+        final String full = Vfs.displayLocation(dir);
+        if (full.equals(crumbsLocation)) {
+            return crumbs;
+        }
+        final List<VFile> chain = new ArrayList<>();
+        for (VFile f = dir; f != null; f = parentOf(f)) {
+            chain.add(0, f);
+        }
+        final List<PathBar.Piece> result = new ArrayList<>();
+        int pos = 0;
+        for (int i = 0; i < chain.size(); i++) {
+            final String loc = Vfs.displayLocation(chain.get(i));
+            if (!full.startsWith(loc) || loc.length() <= pos) {
+                continue;
+            }
+            final String part = full.substring(pos, loc.length());
+            pos = loc.length();
+            int from = 0;
+            while (from < part.length() && (part.charAt(from) == '/' || part.charAt(from) == '\\')) {
+                from++;
+            }
+            final int to = part.endsWith(VFile.ARCHIVE_SEPARATOR) ? part.length() - VFile.ARCHIVE_SEPARATOR.length() : part.length();
+            if (from >= to) {
+                // the root "/" itself
+                from = 0;
+            }
+            result.add(new PathBar.Piece(part.substring(0, from), null, null));
+            result.add(new PathBar.Piece(part.substring(from, to), chain.get(i), null));
+            result.add(new PathBar.Piece(part.substring(to), null, null));
+        }
+        if (pos < full.length()) {
+            result.add(new PathBar.Piece(full.substring(pos), null, null));
+        }
+        result.removeIf(p -> p.getText().isEmpty());
+        crumbs = withSelection(result);
+        crumbsLocation = full;
+
+        return crumbs;
+    }
+
+    /** Opening a crumb puts the cursor on the next part of the path, as going up with Backspace does. */
+    private static @NotNull List<PathBar.Piece> withSelection(final @NotNull List<PathBar.Piece> pieces) {
+        final List<PathBar.Piece> result = new ArrayList<>(pieces.size());
+        String next = null;
+        for (int i = pieces.size() - 1; i >= 0; i--) {
+            final PathBar.Piece p = pieces.get(i);
+            if (p.getTarget() == null) {
+                result.add(0, p);
+                continue;
+            }
+            result.add(0, new PathBar.Piece(p.getText(), p.getTarget(), next));
+            next = p.getText();
+        }
+
+        return result;
+    }
+
+    private void openCrumb(final @NotNull VFile target, final @Nullable String select) {
+        if (feed != null || !target.equals(dir)) {
+            navigate(target, select, true);
+        } else {
+            refresh();
+        }
+        focusTable();
     }
 
     /** Ctrl+F12: user filter. */

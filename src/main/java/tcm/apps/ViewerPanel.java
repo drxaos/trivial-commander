@@ -139,6 +139,10 @@ public final class ViewerPanel extends JPanel {
     private final Timer rewrapTimer = new Timer(REWRAP_DELAY, e -> rewrap());
     /** Scroll position to return to after rewrapping, as a fraction of the text height; negative — to the start. */
     private float restoreScroll = -1;
+    /** Size of the local file when it was loaded (Ctrl+End re-reads a file whose size has changed); -1 — unknown. */
+    private long loadedSize = -1;
+    /** Ctrl+End re-read the file: once the new text is shown, go to its end. */
+    private boolean endAfterLoad;
 
     /** Text area of the viewer: a large text is measured and drawn without shaping (see PlainMetrics, UnshapedViews). */
     private final class ViewerText extends JTextArea {
@@ -402,6 +406,8 @@ public final class ViewerPanel extends JPanel {
      */
     public void load(final @Nullable VFile target) {
         file = target;
+        endAfterLoad = false;
+        loadedSize = -1;
         final int gen = startGeneration();
         if (target == null) {
             showText(new PlainDocument(), "", "");
@@ -425,6 +431,7 @@ public final class ViewerPanel extends JPanel {
                     data = (byte[]) r[0];
                     truncated = (Boolean) r[1];
                     picture = (BufferedImage) r[2];
+                    loadedSize = (Long) r[4];
                     imageView.setImage(picture);
                     if (r[3] != null) {
                         shownMode = Mode.TEXT;
@@ -471,8 +478,10 @@ public final class ViewerPanel extends JPanel {
             final String info = "Directory: " + target.getLocation() + "\n\n" + TextUtil.groupDigits(st.getFiles()) + " file(s), "
                 + TextUtil.groupDigits(Math.max(0, st.getDirs() - 1)) + " dir(s)\n" + TextUtil.groupDigits(st.getBytes()) + " bytes";
 
-            return new Object[] {new byte[0], Boolean.FALSE, null, info};
+            return new Object[] {new byte[0], Boolean.FALSE, null, info, -1L};
         }
+        // before reading: a file growing meanwhile is then re-read by Ctrl+End once more rather than not at all
+        final long size = target.isLocal() ? Files.size(target.getHostPath()) : -1L;
         final byte[] bytes;
         final boolean cut;
         try (InputStream in = Vfs.openInput(target)) {
@@ -484,7 +493,7 @@ public final class ViewerPanel extends JPanel {
             img = IconImages.isIcon(bytes) ? IconImages.decode(bytes, IconImages.LARGEST) : ImageIO.read(new ByteArrayInputStream(bytes));
         }
 
-        return new Object[] {bytes, cut, img, null};
+        return new Object[] {bytes, cut, img, null, size};
     }
 
     /**
@@ -560,6 +569,8 @@ public final class ViewerPanel extends JPanel {
         final int tabWidth = text.getTabSize() * widths.charWidth('m');
         final float scroll = restoreScroll;
         restoreScroll = -1;
+        final boolean end = endAfterLoad;
+        endAfterLoad = false;
         final HTMLEditorKit kit = (HTMLEditorKit) markdown.getEditorKit();
         status.setText("Converting " + f.getName() + "...");
         start(new SwingWorker<Object[], Void>() {
@@ -592,6 +603,9 @@ public final class ViewerPanel extends JPanel {
                     final Object[] r = get();
                     if (effective == Mode.MARKDOWN) {
                         showMarkdown((HTMLDocument) r[0], f.getLocation(), (String) r[1]);
+                        if (end) {
+                            SwingUtilities.invokeLater(ViewerPanel.this::scrollToEnd);
+                        }
                     } else {
                         shownMode = effective;
                         showText((Document) r[0], f.getLocation(), (String) r[1]);
@@ -601,7 +615,9 @@ public final class ViewerPanel extends JPanel {
                         shownMaxLine = maxLine;
                         shownLongest = (Integer) r[3];
                         shownWrapWidth = (Integer) r[4];
-                        if (scroll >= 0) {
+                        if (end) {
+                            SwingUtilities.invokeLater(ViewerPanel.this::scrollToEnd);
+                        } else if (scroll >= 0) {
                             final JScrollBar bar = textScroll.getVerticalScrollBar();
                             // after the new document is laid out
                             SwingUtilities.invokeLater(() -> bar.setValue(Math.round(scroll * bar.getMaximum())));
@@ -876,6 +892,10 @@ public final class ViewerPanel extends JPanel {
             finder.setBackward(false);
         });
         Keys.bindAncestor(this, "F6", this::toggleCursor);
+        // the text components have their own Ctrl+End (caret to the end) that takes precedence over the ancestor binding
+        Keys.bindAncestor(this, "ctrl END", this::goEnd);
+        Keys.bind(text, JComponent.WHEN_FOCUSED, "ctrl END", this::goEnd);
+        Keys.bind(markdown, JComponent.WHEN_FOCUSED, "ctrl END", this::goEnd);
         Keys.bindAncestor(this, "SPACE", () -> page(1));
         Keys.bindAncestor(this, "shift SPACE", () -> page(-1));
         Keys.bindAncestor(this, "LEFT", () -> leftRight(-1));
@@ -969,6 +989,36 @@ public final class ViewerPanel extends JPanel {
 
     private @NotNull JScrollPane shownScroll() {
         return showingImage ? imageView : showingMarkdown ? markdownScroll : textScroll;
+    }
+
+    /** Ctrl+End: a local file whose size has changed since loading (a log being written) is re-read first, then the end is shown. */
+    private void goEnd() {
+        final VFile f = file;
+        if (f != null && f.isLocal() && !f.isDirectory() && loadedSize >= 0) {
+            long size;
+            try {
+                size = Files.size(f.getHostPath());
+            } catch (final IOException e) {
+                // the file is gone: show what was loaded
+                size = loadedSize;
+            }
+            if (size != loadedSize) {
+                load(f);
+                endAfterLoad = true;
+
+                return;
+            }
+        }
+        scrollToEnd();
+    }
+
+    private void scrollToEnd() {
+        if (!showingImage) {
+            final JTextComponent t = shownText();
+            t.setCaretPosition(t.getDocument().getLength());
+        }
+        final JScrollBar bar = shownScroll().getVerticalScrollBar();
+        bar.setValue(bar.getMaximum());
     }
 
     private void page(final int direction) {
