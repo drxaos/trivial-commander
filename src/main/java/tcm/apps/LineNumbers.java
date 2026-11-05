@@ -65,6 +65,9 @@ final class LineNumbers extends JComponent {
 
     LineNumbers(final @NotNull JTextArea area) {
         this.area = area;
+        // paintComponent fills the whole clip; opaque lets the row header viewport blit synchronously with the text
+        // (JViewport blits only opaque views, otherwise it scrolls via a deferred repaint and the numbers lag behind)
+        setOpaque(true);
         area.getDocument().addDocumentListener(documentListener);
         area.addPropertyChangeListener("document", e -> {
             if (e.getOldValue() instanceof Document) {
