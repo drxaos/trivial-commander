@@ -94,7 +94,7 @@ import tcm.util.Settings;
  */
 public final class MainFrame extends JFrame implements PanelHost, CommandLine.Host {
 
-    private static final String APP_TITLE = "Trivial Commander";
+    private static final String APP_TITLE = "Trivial Commander" + (Updates.currentVersion() == null ? "" : " " + Updates.currentVersion());
     /** The window is not wider than this: the panel divider stays in the middle. */
     private static final int NARROW_WIDTH = 1200;
     /** How often panels pick up changes on disk. */
