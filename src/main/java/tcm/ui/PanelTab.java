@@ -572,7 +572,10 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             return;
         }
         if (f.isArchiveFile() && !isLaunchable(f)) {
-            openArchive(f);
+            // help files and installers go to their program; with none associated they are browsed
+            if (!ArchiveFormat.opensWithSystem(f.getName()) || !owner.getHost().openFile(f)) {
+                openArchive(f);
+            }
 
             return;
         }

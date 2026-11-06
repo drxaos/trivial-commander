@@ -24,7 +24,8 @@ import org.jetbrains.annotations.Nullable;
 import lombok.Getter;
 
 /**
- * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg).
+ * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg,
+ * .deb and .rpm packages, CHM help, MSI packages, cabinets, single .gz/.bz2/.xz files).
  * Directories not explicitly present in the archive are reconstructed from file paths.
  */
 public final class ArchiveIndex {
@@ -44,7 +45,7 @@ public final class ArchiveIndex {
     private final long archiveSize;
     private final Map<String, VFile> entries = new HashMap<>();
     private final Map<String, List<VFile>> children = new HashMap<>();
-    /** TAR, ISO, DMG: kept open for the index's whole lifetime — entries are read by offset without re-parsing headers. */
+    /** TAR, ISO, DMG, DEB, RPM, CHM, MSI, CAB: kept open for the index's whole lifetime — entries are read by offset without re-parsing headers. */
     private @Nullable ArchiveReader tar;
     /** A ZIP with encrypted entries: read via commons-compress and read-only. */
     @Getter
@@ -83,6 +84,12 @@ public final class ArchiveIndex {
             case SQUASHFS -> SquashArchives.load(index);
             case PAK -> PakArchives.load(index);
             case DMG -> DmgArchives.load(index);
+            case DEB -> DebArchives.load(index);
+            case RPM -> RpmArchives.load(index);
+            case CHM -> ChmArchives.load(index);
+            case MSI -> MsiArchives.load(index);
+            case CAB -> CabArchives.load(index);
+            case GZ, BZ2, XZ -> CompressedFiles.load(index);
             default -> TarArchives.load(index);
         }
 

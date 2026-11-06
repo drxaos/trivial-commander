@@ -32,7 +32,21 @@ public enum ArchiveFormat {
     /** A Chromium/Electron resource pack (GRIT). */
     PAK(false, ".pak"),
     /** An Apple disk image (UDIF). */
-    DMG(false, ".dmg");
+    DMG(false, ".dmg"),
+    /** A Debian package: an ar archive with control.tar and data.tar. */
+    DEB(false, ".deb", ".udeb"),
+    /** An RPM package: headers and a compressed cpio payload. */
+    RPM(false, ".rpm"),
+    /** Compiled HTML Help. */
+    CHM(false, ".chm"),
+    /** A Windows Installer package or merge module (and, by signature, any OLE2 compound file). */
+    MSI(false, ".msi", ".msm"),
+    /** A Microsoft cabinet. */
+    CAB(false, ".cab"),
+    /** Single compressed files, not TAR (after the TAR formats: ".tar.gz" etc. are matched first). */
+    GZ(false, ".gz"),
+    BZ2(false, ".bz2"),
+    XZ(false, ".xz");
 
     private static final int TAR_MAGIC_OFFSET = 257;
     private static final int PROBE_SIZE = 512;
@@ -41,6 +55,8 @@ public enum ArchiveFormat {
 
     @Getter
     private final boolean writable;
+    /** Lower-case extensions with the dot. */
+    @Getter
     private final List<String> suffixes;
 
     ArchiveFormat(final boolean writable, final @NotNull String... suffixes) {
@@ -55,6 +71,16 @@ public enum ArchiveFormat {
     /** A program that is also an archive (AppImage): Enter runs it, Ctrl+PgDn opens it as an archive. */
     public static boolean isLaunchable(final @NotNull String fileName) {
         return fileName.toLowerCase(Locale.ROOT).endsWith(".appimage");
+    }
+
+    /**
+     * A document or installer that is also an archive (CHM help, MSI package): Enter opens it with the associated program,
+     * if there is one, Ctrl+PgDn opens it as an archive.
+     */
+    public static boolean opensWithSystem(final @NotNull String fileName) {
+        final ArchiveFormat format = of(fileName);
+
+        return format == CHM || format == MSI;
     }
 
     /** Format by file name; null — not an archive extension. */
@@ -84,16 +110,31 @@ public enum ArchiveFormat {
             return RAR;
         }
         if (startsWith(head, 0x1F, 0x8B)) {
-            return TAR_GZ;
+            return CompressedFiles.containsTar(file, TAR_GZ) ? TAR_GZ : GZ;
         }
         if (startsWith(head, 'B', 'Z', 'h')) {
-            return TAR_BZ2;
+            return CompressedFiles.containsTar(file, TAR_BZ2) ? TAR_BZ2 : BZ2;
         }
         if (startsWith(head, 0xFD, '7', 'z', 'X', 'Z', 0)) {
-            return TAR_XZ;
+            return CompressedFiles.containsTar(file, TAR_XZ) ? TAR_XZ : XZ;
         }
         if (startsWith(head, '7', 'z', 0xBC, 0xAF, 0x27, 0x1C)) {
             return SEVEN_ZIP;
+        }
+        if (DebArchives.matches(head)) {
+            return DEB;
+        }
+        if (RpmArchives.matches(head)) {
+            return RPM;
+        }
+        if (ChmArchives.matches(head)) {
+            return CHM;
+        }
+        if (CompoundFile.matches(head)) {
+            return MSI;
+        }
+        if (CabFile.matches(head)) {
+            return CAB;
         }
         if (startsWith(head, 'h', 's', 'q', 's')) {
             return SQUASHFS;

@@ -83,7 +83,10 @@ final class DmgArchives {
         return new ArchiveReader() {
             @Override
             public @NotNull InputStream open(final @NotNull String entry) throws IOException {
-                final InputStream in = apfs != null ? apfs.open(entry) : raw.containsKey(entry) ? stream(raw.get(entry)) : null;
+                final DmgImage.Partition partition = raw.get(entry);
+                final InputStream in = apfs != null
+                    ? apfs.open(entry)
+                    : partition != null ? BlockSource.stream(partition, 0, partition.size()) : null;
                 if (in == null) {
                     throw new FileNotFoundException(archive + VFile.ARCHIVE_SEPARATOR + entry);
                 }
@@ -94,42 +97,6 @@ final class DmgArchives {
             @Override
             public void close() throws IOException {
                 ch.close();
-            }
-        };
-    }
-
-    private static @NotNull InputStream stream(final @NotNull BlockSource source) {
-        return new InputStream() {
-            private long pos;
-
-            @Override
-            public int read() throws IOException {
-                final byte[] one = new byte[1];
-
-                return read(one, 0, 1) < 0 ? -1 : one[0] & 0xFF;
-            }
-
-            @Override
-            public int read(final byte @NotNull [] b, final int off, final int len) throws IOException {
-                if (len == 0) {
-                    return 0;
-                }
-                if (pos >= source.size()) {
-                    return -1;
-                }
-                final int n = (int) Math.min(len, source.size() - pos);
-                source.read(pos, b, off, n);
-                pos += n;
-
-                return n;
-            }
-
-            @Override
-            public long skip(final long n) {
-                final long step = Math.max(0, Math.min(n, source.size() - pos));
-                pos += step;
-
-                return step;
             }
         };
     }

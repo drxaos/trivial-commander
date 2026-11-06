@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -30,6 +31,9 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import org.apache.commons.compress.archivers.cpio.CpioArchiveEntry;
+import org.apache.commons.compress.archivers.cpio.CpioArchiveOutputStream;
+import org.apache.commons.compress.archivers.cpio.CpioConstants;
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
 import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -38,6 +42,7 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
+import org.apache.commons.compress.compressors.gzip.GzipParameters;
 import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream;
 import org.jetbrains.annotations.NotNull;
 
@@ -316,6 +321,8 @@ public final class SmokeTest {
         checkMoreArchives(root, src);
         checkPakArchive(root);
         checkDmgImage(root);
+        checkPackages(root);
+        checkCabinet(root);
         checkIconImages();
         checkEncryptedArchives(root);
         checkArchiveAttributes(root);
@@ -490,6 +497,8 @@ public final class SmokeTest {
         final TestJob brokenTest = new TestJob(List.of(Vfs.stat(broken)));
         exec(brokenTest);
         check(brokenTest.getReport().get(0).startsWith("ERROR"), "test detects broken tar.gz");
+
+        checkCompressedFiles(root);
 
         final Path rar = Files.write(root.resolve("r.rar"), Base64.getDecoder().decode(RAR5));
         check(names(Vfs.resolve(rar.toString())).equals(List.of("d")), "rar listing");
@@ -852,6 +861,166 @@ public final class SmokeTest {
             check(Arrays.equals(in.readAllBytes(), disk), "dmg partition data (zlib, zero, raw, adc)");
         }
         check(ArchiveFormat.detect(Files.write(root.resolve("disk.img"), file.toByteArray())) == ArchiveFormat.DMG, "dmg signature");
+    }
+
+    /**
+     * Plain .gz, .bz2, .xz: one entry named as the archive without the extension, with its real size; by signature (a gzip
+     * takes the name from its header); a compressed TAR under another name is still a TAR; checksums checked by the test.
+     */
+    private static void checkCompressedFiles(final @NotNull Path root) throws Exception {
+        final byte[] text = FIXTURE.getBytes(StandardCharsets.UTF_8);
+        for (final String ext : List.of("gz", "bz2", "xz")) {
+            final ByteArrayOutputStream packed = new ByteArrayOutputStream();
+            final GzipParameters params = new GzipParameters();
+            params.setFileName("inner.log");
+            try (OutputStream out = "gz".equals(ext) ? new GzipCompressorOutputStream(packed, params)
+                : "bz2".equals(ext) ? new BZip2CompressorOutputStream(packed) : new XZCompressorOutputStream(packed)) {
+                out.write(text);
+            }
+            final ArchiveFormat format = ArchiveFormat.valueOf(ext.toUpperCase(Locale.ROOT));
+            final Path file = Files.write(root.resolve("Report.TXT." + ext), packed.toByteArray());
+            check(ArchiveFormat.of(file.getFileName().toString()) == format && Vfs.stat(file).isArchiveFile(), ext + " by extension");
+            check(names(Vfs.resolve(file.toString())).equals(List.of("Report.TXT")), ext + " entry name");
+            check(read(file + "!/Report.TXT").equals(FIXTURE) && Vfs.file(file + "!/Report.TXT").getSize() == text.length, ext + " read and size");
+            final Path disguised = Files.write(root.resolve(ext + "-data.bin"), packed.toByteArray());
+            check(ArchiveFormat.detect(disguised) == format, ext + " signature");
+            check(names(Vfs.archiveDir(disguised, "")).equals(List.of("gz".equals(ext) ? "inner.log" : ext + "-data")), ext + " name by signature");
+            final Path tar = Files.copy(root.resolve("t.tar." + ext), root.resolve("tar-" + ext + ".bin"));
+            check(ArchiveFormat.detect(tar).isTar(), "tar." + ext + " signature");
+            final Path unpacked = Files.createDirectories(root.resolve("un-" + ext));
+            exec(new UnpackJob(List.of(Vfs.stat(file)), Vfs.resolve(unpacked.toString()), "*"));
+            check(Files.readString(unpacked.resolve("Report.TXT")).equals(FIXTURE), ext + " unpack");
+            final byte[] bad = packed.toByteArray();
+            bad[bad.length / 2] ^= 0x55;
+            final TestJob test = new TestJob(List.of(Vfs.stat(Files.write(root.resolve("bad." + ext), bad))));
+            exec(test);
+            check(test.getReport().get(0).startsWith("ERROR"), "test detects broken " + ext);
+        }
+    }
+
+    /** A .deb (gzip control, xz data) shown as data + DEBIAN; an .rpm with a gzip cpio payload and a hard link pair. */
+    private static void checkPackages(final @NotNull Path root) throws Exception {
+        final ByteArrayOutputStream control = new ByteArrayOutputStream();
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new GzipCompressorOutputStream(control))) {
+            tarFile(tar, "./control", "Package: x\n".getBytes(StandardCharsets.UTF_8), 0644);
+        }
+        final ByteArrayOutputStream data = new ByteArrayOutputStream();
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new XZCompressorOutputStream(data))) {
+            tarFile(tar, "./usr/bin/tool", FIXTURE.getBytes(StandardCharsets.UTF_8), 0755);
+        }
+        final ByteArrayOutputStream deb = new ByteArrayOutputStream();
+        deb.write("!<arch>\n".getBytes(StandardCharsets.ISO_8859_1));
+        arMember(deb, "debian-binary", "2.0\n".getBytes(StandardCharsets.ISO_8859_1));
+        arMember(deb, "control.tar.gz", control.toByteArray());
+        arMember(deb, "data.tar.xz", data.toByteArray());
+        final Path debFile = Files.write(root.resolve("p.deb"), deb.toByteArray());
+        check(names(Vfs.resolve(debFile.toString())).equals(List.of("DEBIAN", "usr")), "deb names");
+        check(read(debFile + "!/usr/bin/tool").equals(FIXTURE) && Vfs.file(debFile + "!/usr/bin/tool").getAttrs().equals("rwxr-xr-x"), "deb data");
+        check(read(debFile + "!/DEBIAN/control").equals("Package: x\n"), "deb control");
+        check(ArchiveFormat.detect(Files.write(root.resolve("deb.bin"), deb.toByteArray())) == ArchiveFormat.DEB, "deb signature");
+
+        final ByteArrayOutputStream cpio = new ByteArrayOutputStream();
+        try (CpioArchiveOutputStream out = new CpioArchiveOutputStream(new GzipCompressorOutputStream(cpio), CpioConstants.FORMAT_NEW)) {
+            final byte[] text = FIXTURE.getBytes(StandardCharsets.UTF_8);
+            for (final String name : List.of("./usr/share/link", "./usr/share/data")) {
+                final boolean last = name.endsWith("data");
+                final CpioArchiveEntry e = new CpioArchiveEntry(CpioConstants.FORMAT_NEW, name, last ? text.length : 0);
+                e.setMode(CpioConstants.C_ISREG | 0644);
+                e.setInode(7);
+                e.setNumberOfLinks(2);
+                out.putArchiveEntry(e);
+                if (last) {
+                    out.write(text);
+                }
+                out.closeArchiveEntry();
+            }
+        }
+        final ByteBuffer rpm = ByteBuffer.allocate(96 + 16 + 16 + cpio.size());
+        rpm.putInt(0xEDABEEDB).position(96);
+        rpm.putInt(0x8EADE801).putInt(0).putInt(0).putInt(0);
+        rpm.putInt(0x8EADE801).putInt(0).putInt(0).putInt(0);
+        rpm.put(cpio.toByteArray());
+        final Path rpmFile = Files.write(root.resolve("p.rpm"), rpm.array());
+        check(names(Vfs.resolve(rpmFile + "!/usr/share")).equals(List.of("data", "link")), "rpm names");
+        check(read(rpmFile + "!/usr/share/data").equals(FIXTURE) && read(rpmFile + "!/usr/share/link").equals(FIXTURE), "rpm read with hard link");
+        check(Vfs.file(rpmFile + "!/usr/share/link").getSize() == FIXTURE.length(), "rpm hard link size");
+    }
+
+    private static void tarFile(final @NotNull TarArchiveOutputStream tar, final @NotNull String name, final byte @NotNull [] content, final int mode)
+        throws IOException {
+        final TarArchiveEntry e = new TarArchiveEntry(name);
+        e.setSize(content.length);
+        e.setMode(mode);
+        tar.putArchiveEntry(e);
+        tar.write(content);
+        tar.closeArchiveEntry();
+    }
+
+    private static void arMember(final @NotNull ByteArrayOutputStream ar, final @NotNull String name, final byte @NotNull [] content)
+        throws IOException {
+        final String header = String.format("%-16s%-12s%-6s%-6s%-8s%-10s`\n", name, "0", "0", "0", "100644", content.length);
+        ar.write(header.getBytes(StandardCharsets.ISO_8859_1));
+        ar.write(content);
+        if (content.length % 2 != 0) {
+            ar.write('\n');
+        }
+    }
+
+    /**
+     * A cabinet with two folders: MSZIP of two blocks (the second one compressed against the first as its dictionary) and LZX
+     * holding a stored block; detected by signature under another extension.
+     */
+    private static void checkCabinet(final @NotNull Path root) throws Exception {
+        final byte[] text = FIXTURE.getBytes(StandardCharsets.UTF_8);
+        final int half = text.length / 2;
+        final byte[] block1 = mszipBlock(text, 0, half, null);
+        final byte[] block2 = mszipBlock(text, half, text.length - half, Arrays.copyOf(text, half));
+        final byte[] stored = "stored lzx data\n".repeat(9).getBytes(StandardCharsets.UTF_8);
+        // LZX: no E8 header bit, block type 3, 24-bit length, padding to 16 bits, R0..R2, the raw bytes
+        final int bits = 3 << 28 | stored.length << 4;
+        final ByteBuffer lzx = ByteBuffer.allocate(4 + 12 + stored.length + 1).order(ByteOrder.LITTLE_ENDIAN);
+        lzx.putShort((short) (bits >>> 16)).putShort((short) bits).putInt(1).putInt(1).putInt(1).put(stored);
+        final byte[][] names = {"dir\\a.txt".getBytes(StandardCharsets.US_ASCII), "b.txt".getBytes(StandardCharsets.US_ASCII)};
+        final int filesStart = 36 + 2 * 8;
+        final int dataStart = filesStart + 16 * 2 + names[0].length + names[1].length + 2;
+        final int folder2 = dataStart + 8 * 2 + block1.length + block2.length;
+        final ByteBuffer cab = ByteBuffer.allocate(folder2 + 8 + lzx.capacity()).order(ByteOrder.LITTLE_ENDIAN);
+        cab.putInt(0x4643534D).putInt(0).putInt(cab.capacity()).putInt(0).putInt(filesStart).putInt(0);
+        cab.put((byte) 3).put((byte) 1).putShort((short) 2).putShort((short) 2).putShort((short) 0).putShort((short) 0).putShort((short) 0);
+        cab.putInt(dataStart).putShort((short) 2).putShort((short) 1);
+        cab.putInt(folder2).putShort((short) 1).putShort((short) (3 | 15 << 8));
+        final short date = (short) ((2024 - 1980) << 9 | 5 << 5 | 17);
+        cab.putInt(text.length).putInt(0).putShort((short) 0).putShort(date).putShort((short) (12 << 11)).putShort((short) 0x21);
+        cab.put(names[0]).put((byte) 0);
+        cab.putInt(stored.length).putInt(0).putShort((short) 1).putShort(date).putShort((short) (12 << 11)).putShort((short) 0x20);
+        cab.put(names[1]).put((byte) 0);
+        cab.putInt(0).putShort((short) block1.length).putShort((short) half).put(block1);
+        cab.putInt(0).putShort((short) block2.length).putShort((short) (text.length - half)).put(block2);
+        cab.putInt(0).putShort((short) lzx.capacity()).putShort((short) stored.length).put(lzx.array());
+        final Path file = Files.write(root.resolve("c.cab"), cab.array());
+        check(names(Vfs.resolve(file.toString())).equals(List.of("b.txt", "dir")), "cab names");
+        check(read(file + "!/dir/a.txt").equals(FIXTURE) && Vfs.file(file + "!/dir/a.txt").getAttrs().equals("ra--"), "cab mszip");
+        check(read(file + "!/b.txt").equals(new String(stored, StandardCharsets.UTF_8)), "cab lzx stored block");
+        check(ArchiveFormat.detect(Files.write(root.resolve("cab.bin"), cab.array())) == ArchiveFormat.CAB, "cab signature");
+        final TestJob test = new TestJob(List.of(Vfs.stat(file)));
+        exec(test);
+        check(test.getReport().get(0).startsWith("OK"), "cab test");
+    }
+
+    private static byte @NotNull [] mszipBlock(final byte @NotNull [] data, final int off, final int len, final byte[] dictionary) {
+        final Deflater deflater = new Deflater(Deflater.BEST_COMPRESSION, true);
+        if (dictionary != null) {
+            deflater.setDictionary(dictionary);
+        }
+        deflater.setInput(data, off, len);
+        deflater.finish();
+        final byte[] out = new byte[len + 64];
+        out[0] = 'C';
+        out[1] = 'K';
+        final int n = deflater.deflate(out, 2, out.length - 2);
+        deflater.end();
+
+        return Arrays.copyOf(out, n + 2);
     }
 
     /** ICO with a 32-bit DIB and ICNS with an RLE-packed RGB element plus its mask decode into ARGB images. */

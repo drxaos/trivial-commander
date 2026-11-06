@@ -74,14 +74,27 @@ The Linux archives are skipped on Windows.
   Packing also creates TAR, TAR.GZ, TAR.BZ2 and TAR.XZ (packer buttons in the dialog or the extension of the name); such an archive
   cannot be appended to, so an existing one is replaced after confirmation.
   Names without the UTF-8 flag are read as DOS: CP866 if they are Russian, otherwise CP437.
-- **TAR, TAR.GZ/TGZ, TAR.BZ2, TAR.XZ, RAR (RAR4/RAR5), 7z, ISO, AppImage, squashfs, Chromium/Electron `.pak` and Apple `.dmg`** — read only:
+- **TAR, TAR.GZ/TGZ, TAR.BZ2, TAR.XZ, RAR (RAR4/RAR5), 7z, ISO, AppImage, squashfs, Chromium/Electron `.pak`, Apple `.dmg`,
+  `.deb`, `.rpm`, `.chm`, `.msi`, `.cab` and plain `.gz`, `.bz2`, `.xz`** — read only:
   browsing contents, viewing files, copying from the archive, unpacking, testing. `.pak` resources have only numeric IDs, so they are
   named by ID plus an extension guessed from the content (`1234.png`, `.gz`, `.br`, `.txt`...); aliases are shown as copies. ISO 9660 names come from Rock Ridge (long names, permissions), otherwise
   from Joliet; UDF-only images are not supported. An AppImage is browsed without running it: `Enter` on an executable `.AppImage`
   runs it, `Ctrl+PgDn` opens it as an archive. Symbolic links in ISO/squashfs/DMG are shown as files.
   A `.dmg` (UDIF; zlib, bzip2, ADC, LZMA chunks — not LZFSE) shows the files of its APFS volumes (unencrypted; files compressed by
   macOS with zlib are unpacked); an image with HFS+ or another file system lists its partitions as raw `.img` files. A compressed TAR is unpacked into a temporary `.tar` once
-  (as in TC). `Ctrl+PgDn` opens any file as an archive: the format is detected by signature (`.docx`, `.apk`, `.cbr`...).
+  (as in TC).
+  A `.deb` is shown as `dpkg-deb -R` unpacks it: the files of `data.tar` at the root, the control files in `DEBIAN`
+  (gzip, xz, zstd, bzip2, lzma or none); an `.rpm` shows its cpio payload (gzip, bzip2, xz, lzma, zstd). Symbolic links in them are
+  empty files, as in TAR. A `.chm` lists its pages and images (LZX), hiding the internal `::` entries. An `.msi` shows the files it
+  installs in the tree of its Directory table — standard folders under their names (`ProgramFiles64Folder`, `System64Folder`...) —
+  unpacked from its embedded cabinets or `.cab` files next to it; any other OLE2 compound file (`.doc`, `.xls` by `Ctrl+PgDn`) lists
+  its raw streams. Cabinets: stored, MSZIP and LZX folders (not Quantum), no multi-cabinet sets.
+  A plain `.gz`, `.bz2` or `.xz` (not a TAR) holds one file named as the archive without the extension (`notes.txt.gz` →
+  `notes.txt`); found by signature under another extension, a gzip takes the name stored in its header. The size comes from
+  the gzip trailer (modulo 4 GiB) or the xz index; bzip2 does not store it, so a `.bz2` is decompressed once on opening to count it.
+  `Enter` on a `.chm` or `.msi` opens it with the associated program (help viewer, installer); without one, and with `Ctrl+PgDn`,
+  it is browsed as an archive.
+  `Ctrl+PgDn` opens any file as an archive: the format is detected by signature (`.docx`, `.apk`, `.cbr`...).
   `Enter`/double click on a file without an associated program does the same.
   Entry names with `..` are trimmed, so unpacking cannot escape the target directory.
 - **Encrypted archives**: ZIP (WinZip AES and the traditional ZipCrypto), RAR (encrypted files and encrypted headers)
