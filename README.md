@@ -115,7 +115,9 @@ The Linux archives are skipped on Windows.
   Options (modes `1`–`7`, Markdown `8`, JSON `9`, ANSI `A`, ASCII `S`, other encoding, proportional font `V`, wrap `W`,
   cursor `F6`),
   Image, Help (`F1`). Edit and Options are unavailable for images, Image — for text.
-  Images: PNG, JPEG, GIF, BMP, WBMP, ICO/CUR and ICNS (the largest image of the icon; JPEG 2000 elements of ICNS are skipped).
+  Images: PNG, JPEG, GIF, BMP, WBMP, ICO/CUR, ICNS (the largest image of the icon; JPEG 2000 elements of ICNS are skipped)
+  and SVG/SVGZ (rendered at the drawing's own size, at most 4096 px a side; external files and links in it are not loaded;
+  `1` shows its XML, a broken SVG opens as text). Thumbnails (`Ctrl+Shift+F1`) render SVG too.
   Markdown (CommonMark and GFM tables) is shown rendered, `.md` — right away; raw HTML is shown as text,
   images from the network are not loaded, http/https links open in the browser.
   JSON `9` is shown indented (pretty-print); parsing is lenient, so truncated or broken JSON is formatted too.

@@ -28,6 +28,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -70,6 +71,7 @@ import tcm.ops.PackJob;
 import tcm.ops.TestJob;
 import tcm.ops.UnpackJob;
 import tcm.ui.IconImages;
+import tcm.ui.SvgImages;
 import tcm.util.Diff;
 import tcm.util.Masks;
 import tcm.util.TextUtil;
@@ -324,6 +326,7 @@ public final class SmokeTest {
         checkPackages(root);
         checkCabinet(root);
         checkIconImages();
+        checkSvgImages();
         checkEncryptedArchives(root);
         checkArchiveAttributes(root);
         checkNestedArchives(root);
@@ -1021,6 +1024,26 @@ public final class SmokeTest {
         deflater.end();
 
         return Arrays.copyOf(out, n + 2);
+    }
+
+    /** SVG for the viewer: its own size, viewBox only, gzip (.svgz), a thumbnail enlarged to the box, recognized as an image. */
+    private static void checkSvgImages() throws Exception {
+        final byte[] svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='30' height='20'>"
+            + "<rect width='30' height='20' fill='#ff0000'/></svg>").getBytes(StandardCharsets.UTF_8);
+        final BufferedImage img = SvgImages.render(svg);
+        check(img != null && img.getWidth() == 30 && img.getHeight() == 20 && img.getRGB(15, 10) == 0xFFFF0000, "svg render");
+        final BufferedImage box = SvgImages.render(("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 50'>"
+            + "<circle cx='50' cy='25' r='20' fill='blue'/></svg>").getBytes(StandardCharsets.UTF_8));
+        check(box != null && box.getWidth() == 100 && box.getHeight() == 50 && box.getRGB(50, 25) == 0xFF0000FF, "svg viewBox size");
+        final ByteArrayOutputStream gz = new ByteArrayOutputStream();
+        try (OutputStream out = new GZIPOutputStream(gz)) {
+            out.write(svg);
+        }
+        final BufferedImage svgz = SvgImages.render(gz.toByteArray());
+        check(svgz != null && svgz.getRGB(1, 1) == 0xFFFF0000, "svgz render");
+        final BufferedImage thumb = SvgImages.thumbnail(svg, 40);
+        check(thumb != null && thumb.getWidth() == 40 && thumb.getHeight() == 27, "svg thumbnail");
+        check(SvgImages.isSvg("A.SVG") && SvgImages.isSvg("b.svgz") && !SvgImages.isSvg("c.svg.txt"), "svg names");
     }
 
     /** ICO with a 32-bit DIB and ICNS with an RLE-packed RGB element plus its mask decode into ARGB images. */

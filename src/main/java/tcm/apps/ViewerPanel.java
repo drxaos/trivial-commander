@@ -68,6 +68,7 @@ import tcm.core.TreeStats;
 import tcm.core.VFile;
 import tcm.core.Vfs;
 import tcm.ui.IconImages;
+import tcm.ui.SvgImages;
 import tcm.util.Keys;
 import tcm.util.TextUtil;
 
@@ -490,10 +491,20 @@ public final class ViewerPanel extends JPanel {
         }
         BufferedImage img = null;
         if (target.isImage()) {
-            img = IconImages.isIcon(bytes) ? IconImages.decode(bytes, IconImages.LARGEST) : ImageIO.read(new ByteArrayInputStream(bytes));
+            img = SvgImages.isSvg(target.getName()) ? svg(bytes)
+                : IconImages.isIcon(bytes) ? IconImages.decode(bytes, IconImages.LARGEST) : ImageIO.read(new ByteArrayInputStream(bytes));
         }
 
         return new Object[] {bytes, cut, img, null, size};
+    }
+
+    /** A broken SVG is shown as its XML text, as an unreadable raster image falls back to a dump. */
+    private static @Nullable BufferedImage svg(final byte @NotNull [] bytes) {
+        try {
+            return SvgImages.render(bytes);
+        } catch (final IOException | RuntimeException e) {
+            return null;
+        }
     }
 
     /**

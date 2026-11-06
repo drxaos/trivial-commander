@@ -90,7 +90,8 @@ public final class ThumbCache {
         }
         try (InputStream in = Vfs.openInput(file)) {
             final String ext = file.getExtension().toLowerCase(Locale.ROOT);
-            final BufferedImage img = ext.equals("ico") || ext.equals("icns") ? IconImages.decode(in.readAllBytes(), SIZE) : ImageIO.read(in);
+            final BufferedImage img = ext.equals("svg") || ext.equals("svgz") ? SvgImages.thumbnail(in.readAllBytes(), SIZE)
+                : ext.equals("ico") || ext.equals("icns") ? IconImages.decode(in.readAllBytes(), SIZE) : ImageIO.read(in);
             if (img == null) {
                 return null;
             }

@@ -35,7 +35,7 @@ import tcm.util.TextUtil;
  */
 public final class Vfs {
 
-    public static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "bmp", "wbmp", "ico", "icns");
+    public static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "bmp", "wbmp", "ico", "icns", "svg", "svgz");
 
     private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     private static final Map<Path, ArchiveIndex> ARCHIVES = new ConcurrentHashMap<>();
