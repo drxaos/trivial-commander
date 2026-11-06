@@ -21,6 +21,10 @@ target/tcm
 
 Also packs `target/tcm-1.0.0-linux-amd64.tar.xz` and `target/tcm-1.0.0-linux-amd64.AppImage`
 (the AppImage needs `mksquashfs` from squashfs-tools; the AppImage runtime is downloaded once into `~/.cache/appimage`).
+On every launch the AppImage puts itself into the application menu: it writes `~/.local/share/applications/tcm.desktop`
+and its icon, and rewrites the entry when the AppImage file has moved. It leaves the menu to Gear Lever, AppImageLauncher,
+appimaged or a system package when one of them has an entry for TCM, keeps an entry hidden in a menu editor hidden,
+and never touches a `tcm.desktop` it did not write.
 
 #### Windows
 

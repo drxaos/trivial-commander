@@ -15,11 +15,14 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.zip.Deflater;
@@ -39,6 +42,7 @@ import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream;
 import org.jetbrains.annotations.NotNull;
 
 import tcm.apps.ConsoleWindow;
+import tcm.core.AppImageDesktopEntry;
 import tcm.core.ArchiveFormat;
 import tcm.core.DirWatcher;
 import tcm.core.FileAttrs;
@@ -319,6 +323,66 @@ public final class SmokeTest {
         checkWatcher(root);
         checkUtils();
         checkPlatform(root);
+        checkDesktopEntry(root);
+    }
+
+    /** The menu entry an AppImage writes for itself, and when it leaves the menu to another integration. */
+    private static void checkDesktopEntry(final @NotNull Path root) throws Exception {
+        final Path home = Files.createDirectories(root.resolve("home"));
+        final Path appDir = Files.createDirectories(root.resolve("AppDir"));
+        Files.writeString(appDir.resolve("tcm.svg"), "<svg/>");
+        final Path apps = home.resolve(".local/share/applications");
+        final Path entry = apps.resolve("tcm.desktop");
+        final Path icon = home.resolve(".local/share/icons/hicolor/scalable/apps/tcm.svg");
+        final Path appImage = root.resolve("Down loads/tcm-1.0.0-linux-amd64.AppImage");
+        final Map<String, String> env = new HashMap<>();
+        env.put("APPIMAGE", appImage.toString());
+        env.put("APPDIR", appDir.toString());
+        env.put("XDG_DATA_DIRS", root.resolve("system").toString());
+
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.INTEGRATED, "desktop entry: first launch");
+        final String written = Files.readString(entry);
+        check(written.contains("\nExec=\"" + appImage + "\" %F\n"), "desktop entry: quoted Exec: " + written);
+        check(written.contains("\nTryExec=" + appImage + "\n") && written.contains("\nStartupWMClass=tcm-Main\n"), "desktop entry: keys");
+        check(written.contains("\nIcon=" + icon + "\n") && Files.readString(icon).equals("<svg/>"), "desktop entry: icon copied");
+        final FileTime mtime = Files.getLastModifiedTime(entry);
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.INTEGRATED, "desktop entry: second launch");
+        check(Files.getLastModifiedTime(entry).equals(mtime), "desktop entry: unchanged entry not rewritten");
+
+        final Path moved = root.resolve("Apps/100%.AppImage");
+        env.put("APPIMAGE", moved.toString());
+        AppImageDesktopEntry.reconcile(env, home);
+        check(Files.readString(entry).contains("\nExec=\"" + root.resolve("Apps/100%%.AppImage") + "\" %F\n"), "desktop entry: moved AppImage");
+
+        Files.writeString(entry, Files.readString(entry) + "NoDisplay=true\n");
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.HIDDEN_BY_USER, "desktop entry: hidden by user");
+        check(Files.readString(entry).contains("NoDisplay=true"), "desktop entry: hidden entry kept");
+        Files.delete(entry);
+
+        AppImageDesktopEntry.reconcile(env, home);
+        final Path gearLever = apps.resolve("tcm-gearlever.desktop");
+        Files.writeString(gearLever, "[Desktop Entry]\nName=TCM\nExec=env DESKTOPINTEGRATION=1 " + moved + " %F\n");
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.EXTERNAL, "desktop entry: foreign entry");
+        check(!Files.exists(entry), "desktop entry: withdrawn for a foreign entry");
+        Files.delete(gearLever);
+
+        AppImageDesktopEntry.reconcile(env, home);
+        env.put("DESKTOPINTEGRATION", "1");
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.EXTERNAL, "desktop entry: DESKTOPINTEGRATION");
+        check(!Files.exists(entry) && !Files.exists(icon), "desktop entry: withdrawn with its icon");
+        env.remove("DESKTOPINTEGRATION");
+
+        Files.writeString(entry, "[Desktop Entry]\nName=Mine\n");
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.EXTERNAL, "desktop entry: user's own file");
+        check(Files.readString(entry).equals("[Desktop Entry]\nName=Mine\n"), "desktop entry: user's own file untouched");
+        Files.delete(entry);
+
+        AppImageDesktopEntry.reconcile(env, home);
+        Files.createDirectories(root.resolve("system/applications"));
+        Files.writeString(root.resolve("system/applications/tcm.desktop"), "[Desktop Entry]\nName=TCM\n");
+        env.remove("APPIMAGE");
+        check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.NOT_APPIMAGE, "desktop entry: package run");
+        check(!Files.exists(entry), "desktop entry: withdrawn for an installed package");
     }
 
     /** Behavior that differs between OSes: deleting read-only files, the command line (spaces, console encoding), attributes. */
