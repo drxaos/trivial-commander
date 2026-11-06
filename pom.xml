@@ -6,7 +6,7 @@
 
     <groupId>tcm</groupId>
     <artifactId>tcm</artifactId>
-    <version>1.0.0</version>
+    <version>0.0</version>
     <packaging>jar</packaging>
     <name>TCM</name>
 
@@ -93,6 +93,22 @@
     </dependencies>
 
     <build>
+        <!-- only version.properties is filtered: other resources may contain ${...} literally -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <exclude>tcm/version.properties</exclude>
+                </excludes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>tcm/version.properties</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

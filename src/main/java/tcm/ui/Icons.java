@@ -36,6 +36,7 @@ public final class Icons {
     private static final Color IMAGE_SKY = new Color(0x6FA8DC);
     private static final Color IMAGE_HILL = new Color(0x5AA45A);
     private static final Color ACCENT = new Color(0x3C82D2);
+    private static final Color UPDATE_FILL = new Color(0x2E9E4F);
 
     public static final Icon FOLDER = new Painted(16, Icons::paintFolder);
     public static final Icon FILE = new Painted(16, Icons::paintFile);
@@ -56,6 +57,7 @@ public final class Icons {
     public static final Icon HIDDEN = new Painted(18, Icons::paintEye);
     public static final Icon SWAP = new Painted(18, Icons::paintSwap);
     public static final Icon SAME_DIR = new Painted(18, Icons::paintSameDir);
+    public static final Icon UPDATE = new Painted(18, Icons::paintUpdate);
 
     private Icons() {
     }
@@ -337,5 +339,15 @@ public final class Icons {
         g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         g.drawLine(5, 8, 11, 8);
         g.drawLine(5, 11, 11, 11);
+    }
+
+    private static void paintUpdate(final @NotNull Graphics2D g, final int s) {
+        g.setColor(UPDATE_FILL);
+        g.fillOval(1, 1, 16, 16);
+        g.setColor(Color.WHITE);
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.drawLine(9, 6, 9, 13);
+        g.drawLine(6, 9, 9, 6);
+        g.drawLine(12, 9, 9, 6);
     }
 }

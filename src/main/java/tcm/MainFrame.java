@@ -22,11 +22,14 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -34,6 +37,7 @@ import java.util.function.Consumer;
 
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -67,6 +71,7 @@ import lombok.Getter;
 import tcm.apps.AppWindows;
 import tcm.apps.ViewerPanel;
 import tcm.core.DirWatcher;
+import tcm.core.Updates;
 import tcm.core.VFile;
 import tcm.ops.JobRunner;
 import tcm.ui.CommandLine;
@@ -96,6 +101,8 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
     private static final int WATCH_PERIOD_MS = 1000;
     /** How often window, tab and history state is saved without exiting the program. */
     private static final int SAVE_PERIOD_MS = 30_000;
+    /** How often GitHub is asked for a new release. */
+    private static final int UPDATE_PERIOD_MS = 60 * 60 * 1000;
 
     @Getter
     private final @NotNull FilePanel leftPanel;
@@ -112,6 +119,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
     private final JToolBar toolBar = new JToolBar();
     private final JToggleButton thumbsButton = new JToggleButton(Icons.THUMBS);
     private final JToggleButton hiddenButton = new JToggleButton(Icons.HIDDEN);
+    private final JButton updateButton = new JButton(Icons.UPDATE);
     private boolean showHidden = Settings.getBoolean("showHidden", false);
     private boolean thumbs = Settings.getBoolean("thumbs", false);
     private boolean brief = Settings.getBoolean("brief", false);
@@ -184,6 +192,8 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         new Timer(WATCH_PERIOD_MS, e -> refreshPanelsQuietly(dirWatcher.watch(watchedDirs()))).start();
         // on crash or kill without closing the window, no more than one period is lost
         new Timer(SAVE_PERIOD_MS, e -> saveSettings()).start();
+        checkUpdates();
+        new Timer(UPDATE_PERIOD_MS, e -> checkUpdates()).start();
         installQuitHandler();
         // when the window opens, focus must go to the active panel's table, not to the first component at hand
         setFocusTraversalPolicy(new LayoutFocusTraversalPolicy() {
@@ -1097,7 +1107,48 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         tool(Icons.SWAP, "Swap panels (Ctrl+U)", () -> swapPanels(false));
         tool(Icons.NEW_TAB, "New tab (Ctrl+T)", () -> newTab(false));
         tool(Icons.TERMINAL, "Terminal", () -> commands.openTerminal(activePanel.getCurrentTab().getDir()));
+        toolBar.add(Box.createHorizontalGlue());
+        updateButton.setFocusable(false);
+        updateButton.setVisible(false);
+        updateButton.addActionListener(e -> openReleasesPage());
+        toolBar.add(updateButton);
         Keys.bindAncestor(toolBar, "ESCAPE", this::focusActive);
+    }
+
+    /** In the background: without network the request may hang for the whole timeout. Failures are silent. */
+    private void checkUpdates() {
+        final Thread t = new Thread(() -> {
+            final String tag;
+            try {
+                tag = Updates.newerRelease();
+            } catch (final IOException | RuntimeException e) {
+                // offline or GitHub unavailable — keep the button as it was, the next check will tell
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                updateButton.setVisible(tag != null);
+                if (tag != null) {
+                    updateButton.setToolTipText("Update available: " + tag + " (current " + Updates.currentVersion() + ")");
+                }
+            });
+        }, "update-check");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void openReleasesPage() {
+        try {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                Desktop.getDesktop().browse(URI.create(Updates.RELEASES_PAGE));
+            } else {
+                final String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+                new ProcessBuilder(os.contains("mac") ? "open" : "xdg-open", Updates.RELEASES_PAGE).start();
+            }
+        } catch (final IOException | RuntimeException e) {
+            JOptionPane.showMessageDialog(this, "Cannot open " + Updates.RELEASES_PAGE + "\n" + e.getMessage(), "Error",
+                JOptionPane.ERROR_MESSAGE);
+        }
+        focusActive();
     }
 
     private void tool(final @NotNull Icon icon, final @NotNull String tooltip, final @NotNull Runnable action) {
