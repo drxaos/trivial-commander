@@ -1645,6 +1645,12 @@
         {
           "name": "windingRule"
         }
+      ],
+      "methods": [
+        {
+          "name": "trimToSize",
+          "parameterTypes": []
+        }
       ]
     },
     {
@@ -1837,6 +1843,19 @@
       ]
     },
     {
+      "type": "java.awt.image.AffineTransformOp"
+    },
+    {
+      "type": "java.awt.image.ConvolveOp"
+    },
+    {
+      "type": "java.awt.image.LookupOp"
+    },
+    {
+      "type": "java.awt.image.PackedColorModel",
+      "jniAccessible": true
+    },
+    {
       "type": "java.awt.image.Raster",
       "jniAccessible": true,
       "fields": [
@@ -2003,6 +2022,18 @@
     },
     {
       "type": "java.util.List"
+    },
+    {
+      "type": "javax.imageio.IIOException",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        }
+      ]
     },
     {
       "type": "javax.imageio.plugins.jpeg.JPEGHuffmanTable",

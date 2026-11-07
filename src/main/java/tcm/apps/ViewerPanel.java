@@ -14,7 +14,6 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.InputEvent;
 import java.awt.image.BufferedImage;
 import java.awt.print.PrinterException;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,7 +32,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.function.IntConsumer;
 
-import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
@@ -68,6 +66,7 @@ import tcm.core.TreeStats;
 import tcm.core.VFile;
 import tcm.core.Vfs;
 import tcm.ui.IconImages;
+import tcm.ui.RasterImages;
 import tcm.ui.SvgImages;
 import tcm.util.Keys;
 import tcm.util.TextUtil;
@@ -492,7 +491,7 @@ public final class ViewerPanel extends JPanel {
         BufferedImage img = null;
         if (target.isImage()) {
             img = SvgImages.isSvg(target.getName()) ? svg(bytes)
-                : IconImages.isIcon(bytes) ? IconImages.decode(bytes, IconImages.LARGEST) : ImageIO.read(new ByteArrayInputStream(bytes));
+                : IconImages.isIcon(bytes) ? IconImages.decode(bytes, IconImages.LARGEST) : RasterImages.read(bytes);
         }
 
         return new Object[] {bytes, cut, img, null, size};

@@ -20,7 +20,8 @@ import org.jetbrains.annotations.Nullable;
 /**
  * 7z (via commons-compress) — read only. Encrypted headers (the listing) and encrypted entries ask for the password
  * via {@link Passwords}. 7z has no password check value: a wrong password shows up as a decoding error in the first bytes
- * (or as a CRC error at the end of a stored entry).
+ * (or as a CRC error at the end of a stored entry). Folders with multi-stream coders (BCJ2), which commons-compress
+ * cannot unpack, are decoded by {@link SevenZipFolders}.
  */
 final class SevenZipArchives {
 
@@ -65,6 +66,11 @@ final class SevenZipArchives {
             private @NotNull SevenZFile z = SevenZipArchives.open(archive);
             private @Nullable Map<String, SevenZArchiveEntry> byName;
             private boolean withPassword;
+            private @Nullable String password;
+            /** Entry name -> its stream number, for the folders commons-compress cannot decode. */
+            private @Nullable Map<String, Integer> streamOf;
+            private @Nullable SevenZipFolders folders;
+            private boolean foldersFailed;
 
             @Override
             public @NotNull InputStream open(final @NotNull String entry) throws IOException {
@@ -74,6 +80,11 @@ final class SevenZipArchives {
                 }
                 if (!e.hasStream()) {
                     return InputStream.nullInputStream();
+                }
+                final SevenZipFolders own = folders();
+                final Integer stream = streamOf().get(entry);
+                if (own != null && stream != null && own.isComplex(stream)) {
+                    return openOwn(own, stream, entry);
                 }
                 if (withPassword) {
                     return z.getInputStream(e);
@@ -99,6 +110,7 @@ final class SevenZipArchives {
                         z = reopened;
                         byName = index(reopened);
                         withPassword = true;
+                        this.password = password;
 
                         return in;
                     } catch (final IOException | RuntimeException ex) {
@@ -106,6 +118,70 @@ final class SevenZipArchives {
                         throw ex;
                     }
                 });
+            }
+
+            private @NotNull InputStream openOwn(final @NotNull SevenZipFolders own, final int stream, final @NotNull String entry)
+                throws IOException {
+                if (!own.needsPassword(stream)) {
+                    return prefetch(own.open(stream, null));
+                }
+                final String known = password;
+                if (known != null) {
+                    return own.open(stream, known);
+                }
+
+                return Passwords.withPassword(archive, pw -> {
+                    final InputStream in = probe(() -> own.open(stream, pw), entry);
+                    password = pw;
+
+                    return in;
+                });
+            }
+
+            /**
+             * Parsed on the first entry; null — the parser does not understand the archive, then commons-compress
+             * reads everything it can as before.
+             */
+            private @Nullable SevenZipFolders folders() throws IOException {
+                if (folders == null && !foldersFailed) {
+                    try {
+                        final SevenZipFolders parsed = openFolders(archive, password);
+                        int withData = 0;
+                        for (final SevenZArchiveEntry e : z.getEntries()) {
+                            withData += e.hasStream() ? 1 : 0;
+                        }
+                        if (parsed.streamCount() == withData) {
+                            folders = parsed;
+                        } else {
+                            parsed.close();
+                            foldersFailed = true;
+                        }
+                    } catch (final PasswordCancelledException e) {
+                        throw e;
+                    } catch (final IOException | RuntimeException e) {
+                        foldersFailed = true;
+                    }
+                }
+
+                return folders;
+            }
+
+            private @NotNull Map<String, Integer> streamOf() {
+                if (streamOf == null) {
+                    final Map<String, Integer> map = new HashMap<>();
+                    int stream = 0;
+                    for (final SevenZArchiveEntry e : z.getEntries()) {
+                        if (e.hasStream()) {
+                            if (!e.isDirectory() && !e.isAntiItem()) {
+                                map.putIfAbsent(ArchiveIndex.entryName(e.getName()), stream);
+                            }
+                            stream++;
+                        }
+                    }
+                    streamOf = map;
+                }
+
+                return streamOf;
             }
 
             private @NotNull Map<String, SevenZArchiveEntry> entries() {
@@ -118,7 +194,13 @@ final class SevenZipArchives {
 
             @Override
             public void close() throws IOException {
-                z.close();
+                try {
+                    z.close();
+                } finally {
+                    if (folders != null) {
+                        folders.close();
+                    }
+                }
             }
         };
     }
@@ -164,9 +246,13 @@ final class SevenZipArchives {
      */
     private static @NotNull InputStream probe(final @NotNull SevenZFile z, final @NotNull SevenZArchiveEntry e, final @NotNull String entry)
         throws IOException {
+        return probe(() -> z.getInputStream(e), entry);
+    }
+
+    private static @NotNull InputStream probe(final @NotNull IoSupplier<InputStream> open, final @NotNull String entry) throws IOException {
         final InputStream in;
         try {
-            in = z.getInputStream(e);
+            in = open.get();
         } catch (final PasswordRequiredException ex) {
             throw ex;
         } catch (final IOException | RuntimeException ex) {
@@ -181,6 +267,18 @@ final class SevenZipArchives {
         }
 
         return new SequenceInputStream(new ByteArrayInputStream(head), in);
+    }
+
+    /**
+     * The archive's folders for the streams commons-compress cannot decode (BCJ2). Encrypted headers take the password
+     * already given for the listing.
+     */
+    private static @NotNull SevenZipFolders openFolders(final @NotNull Path archive, final @Nullable String password) throws IOException {
+        try {
+            return SevenZipFolders.open(archive, password);
+        } catch (final PasswordRequiredException e) {
+            return Passwords.withPassword(archive, pw -> SevenZipFolders.open(archive, pw));
+        }
     }
 
     /** Without a password; encrypted headers ask for it. */

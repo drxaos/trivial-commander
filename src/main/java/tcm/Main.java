@@ -30,7 +30,10 @@ public final class Main {
 
     public static void main(final String[] args) {
         initNativeImage();
-        System.setProperty("awt.useSystemAAFontSettings", "on");
+        // on Windows the desktop hints (ClearType) apply; forced grayscale makes letters look bolder than digits
+        if (!System.getProperty("os.name", "").startsWith("Windows")) {
+            System.setProperty("awt.useSystemAAFontSettings", "on");
+        }
         AppImageDesktopEntry.reconcileInBackground();
         SwingUtilities.invokeLater(() -> {
             applyTheme(Settings.get("theme", "Light"));

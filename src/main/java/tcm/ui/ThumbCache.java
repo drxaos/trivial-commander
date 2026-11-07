@@ -14,7 +14,6 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 import javax.swing.SwingUtilities;
 
@@ -91,7 +90,7 @@ public final class ThumbCache {
         try (InputStream in = Vfs.openInput(file)) {
             final String ext = file.getExtension().toLowerCase(Locale.ROOT);
             final BufferedImage img = ext.equals("svg") || ext.equals("svgz") ? SvgImages.thumbnail(in.readAllBytes(), SIZE)
-                : ext.equals("ico") || ext.equals("icns") ? IconImages.decode(in.readAllBytes(), SIZE) : ImageIO.read(in);
+                : ext.equals("ico") || ext.equals("icns") ? IconImages.decode(in.readAllBytes(), SIZE) : RasterImages.read(in.readAllBytes());
             if (img == null) {
                 return null;
             }
