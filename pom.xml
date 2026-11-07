@@ -6,7 +6,7 @@
 
     <groupId>tcm</groupId>
     <artifactId>tcm</artifactId>
-    <version>0.4</version>
+    <version>0.0</version>
     <packaging>jar</packaging>
     <name>TCM</name>
 
