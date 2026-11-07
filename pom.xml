@@ -198,6 +198,23 @@
                 <dist.linux.skip>true</dist.linux.skip>
                 <dist.windows.skip>false</dist.windows.skip>
             </properties>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.graalvm.buildtools</groupId>
+                            <artifactId>native-maven-plugin</artifactId>
+                            <configuration>
+                                <buildArgs>
+                                    <buildArg>-H:NativeLinkerOption=/SUBSYSTEM:WINDOWS</buildArg>
+                                    <buildArg>-H:NativeLinkerOption=/ENTRY:mainCRTStartup</buildArg>
+                                    <buildArg>-H:NativeLinkerOption=${project.basedir}/src/windows/tcm.res</buildArg>
+                                </buildArgs>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+            </build>
         </profile>
         <!-- graalvm-25; on Windows run from a shell with the MSVC environment (vcvars64.bat / x64 Native Tools Command Prompt) -->
         <profile>
