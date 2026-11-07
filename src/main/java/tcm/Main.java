@@ -16,6 +16,7 @@ import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 
 import tcm.core.AppImageDesktopEntry;
+import tcm.core.WindowsMenuEntry;
 import tcm.util.Settings;
 
 /**
@@ -35,6 +36,7 @@ public final class Main {
             System.setProperty("awt.useSystemAAFontSettings", "on");
         }
         AppImageDesktopEntry.reconcileInBackground();
+        WindowsMenuEntry.reconcileInBackground();
         SwingUtilities.invokeLater(() -> {
             applyTheme(Settings.get("theme", "Light"));
             new MainFrame().setVisible(true);

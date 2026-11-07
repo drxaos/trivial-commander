@@ -49,6 +49,7 @@ import org.jetbrains.annotations.NotNull;
 
 import tcm.apps.ConsoleWindow;
 import tcm.core.AppImageDesktopEntry;
+import tcm.core.WindowsMenuEntry;
 import tcm.core.ArchiveFormat;
 import tcm.core.DirWatcher;
 import tcm.core.FileAttrs;
@@ -334,6 +335,7 @@ public final class SmokeTest {
         checkUtils();
         checkPlatform(root);
         checkDesktopEntry(root);
+        checkWindowsMenuEntry(root);
     }
 
     /** The menu entry an AppImage writes for itself, and when it leaves the menu to another integration. */
@@ -352,9 +354,12 @@ public final class SmokeTest {
 
         check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.INTEGRATED, "desktop entry: first launch");
         final String written = Files.readString(entry);
-        check(written.contains("\nExec=\"" + appImage + "\" %F\n"), "desktop entry: quoted Exec: " + written);
-        check(written.contains("\nTryExec=" + appImage + "\n") && written.contains("\nStartupWMClass=tcm-Main\n"), "desktop entry: keys");
-        check(written.contains("\nIcon=" + icon + "\n") && Files.readString(icon).equals("<svg/>"), "desktop entry: icon copied");
+        final String appImageEsc = appImage.toString().replace("\\", "\\\\\\\\");
+        final String iconEsc = icon.toString().replace("\\", "\\\\");
+        check(written.contains("\nExec=\"" + appImageEsc + "\" %F\n"), "desktop entry: quoted Exec: " + written);
+        check(written.contains("\nTryExec=" + iconEsc + "\n") || written.contains("\nTryExec=" + appImage.toString().replace("\\", "\\\\") + "\n"), "desktop entry: keys");
+        check(written.contains("\nStartupWMClass=tcm-Main\n"), "desktop entry: startup wm class");
+        check(written.contains("\nIcon=" + iconEsc + "\n") && Files.readString(icon).equals("<svg/>"), "desktop entry: icon copied");
         final FileTime mtime = Files.getLastModifiedTime(entry);
         check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.INTEGRATED, "desktop entry: second launch");
         check(Files.getLastModifiedTime(entry).equals(mtime), "desktop entry: unchanged entry not rewritten");
@@ -362,7 +367,8 @@ public final class SmokeTest {
         final Path moved = root.resolve("Apps/100%.AppImage");
         env.put("APPIMAGE", moved.toString());
         AppImageDesktopEntry.reconcile(env, home);
-        check(Files.readString(entry).contains("\nExec=\"" + root.resolve("Apps/100%%.AppImage") + "\" %F\n"), "desktop entry: moved AppImage");
+        final String movedEsc = root.resolve("Apps/100%%.AppImage").toString().replace("\\", "\\\\\\\\");
+        check(Files.readString(entry).contains("\nExec=\"" + movedEsc + "\" %F\n"), "desktop entry: moved AppImage");
 
         Files.writeString(entry, Files.readString(entry) + "NoDisplay=true\n");
         check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.HIDDEN_BY_USER, "desktop entry: hidden by user");
@@ -393,6 +399,41 @@ public final class SmokeTest {
         env.remove("APPIMAGE");
         check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.NOT_APPIMAGE, "desktop entry: package run");
         check(!Files.exists(entry), "desktop entry: withdrawn for an installed package");
+    }
+
+    private static void checkWindowsMenuEntry(final @NotNull Path root) throws Exception {
+        final Path winDir = Files.createDirectories(root.resolve("win-programs"));
+        final Path exe1 = root.resolve("bin/tcm.exe");
+        final Path exe2 = root.resolve("other-bin/tcm.exe");
+        Files.createDirectories(exe1.getParent());
+        Files.createDirectories(exe2.getParent());
+        Files.writeString(exe1, "exe1");
+        Files.writeString(exe2, "exe2");
+
+        final Path shortcut = winDir.resolve(WindowsMenuEntry.SHORTCUT_FILE_NAME);
+
+        // In test mode on non-native environment, zero-arg reconcile() returns NOT_WINDOWS_NATIVE
+        check(WindowsMenuEntry.reconcile() == WindowsMenuEntry.Status.NOT_WINDOWS_NATIVE, "windows menu: jvm mode");
+
+        if (!POSIX) {
+            // First launch: creates shortcut
+            check(WindowsMenuEntry.reconcile(exe1, winDir) == WindowsMenuEntry.Status.CREATED, "windows menu: first launch created");
+            check(Files.exists(shortcut), "windows menu: shortcut file exists");
+            check(WindowsMenuEntry.isUpToDate(shortcut, exe1), "windows menu: shortcut is up to date");
+
+            final FileTime mtime = Files.getLastModifiedTime(shortcut);
+            // Second launch: already up to date
+            check(WindowsMenuEntry.reconcile(exe1, winDir) == WindowsMenuEntry.Status.UP_TO_DATE, "windows menu: second launch up to date");
+            check(Files.getLastModifiedTime(shortcut).equals(mtime), "windows menu: up to date shortcut not rewritten");
+
+            // Moved executable: updates existing shortcut
+            check(WindowsMenuEntry.reconcile(exe2, winDir) == WindowsMenuEntry.Status.UPDATED, "windows menu: moved exe updated");
+            check(WindowsMenuEntry.isUpToDate(shortcut, exe2), "windows menu: updated shortcut matches exe2");
+            check(!WindowsMenuEntry.isUpToDate(shortcut, exe1), "windows menu: updated shortcut no longer matches exe1");
+
+            // Third launch: up to date with new path
+            check(WindowsMenuEntry.reconcile(exe2, winDir) == WindowsMenuEntry.Status.UP_TO_DATE, "windows menu: third launch up to date");
+        }
     }
 
     /** Behavior that differs between OSes: deleting read-only files, the command line (spaces, console encoding), attributes. */

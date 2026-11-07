@@ -38,6 +38,8 @@ target\tcm.exe
 
 Packs `target/tcm-1.0.0-windows-amd64.zip`: `tcm.exe`, the JDK DLLs it loads (AWT, fonts, JPEG, color management)
 and `lib/fontconfig.bfc` (Windows has no system fontconfig, without it the UI does not start) must stay together.
+On launch the native executable registers a shortcut in the Start Menu (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Trivial Commander.lnk`)
+with `AppUserModelID` for taskbar grouping, and automatically updates the shortcut when the executable has moved.
 The Linux archives are skipped on Windows.
 
 ## Features

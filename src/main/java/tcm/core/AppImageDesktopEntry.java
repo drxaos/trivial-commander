@@ -231,7 +231,8 @@ public final class AppImageDesktopEntry {
             ? "/usr/local/share:/usr/share"
             : env.get("XDG_DATA_DIRS");
 
-        return Arrays.stream(dirs.split(":"))
+        final String sep = java.io.File.pathSeparatorChar == ';' ? ";" : ":";
+        return Arrays.stream(dirs.split(sep))
             .filter(AppImageDesktopEntry::isAbsolute)
             .map(dir -> Path.of(dir, "applications", DESKTOP_FILE_NAME))
             .filter(path -> !path.toAbsolutePath().normalize().equals(ownPath.toAbsolutePath().normalize()))
