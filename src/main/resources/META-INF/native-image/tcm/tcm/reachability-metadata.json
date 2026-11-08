@@ -4192,6 +4192,167 @@
       ]
     },
     {
+      "type": "sun.awt.datatransfer.DataTransferer",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "getInstance",
+          "parameterTypes": []
+        },
+        {
+          "name": "convertData",
+          "parameterTypes": [
+            "java.lang.Object",
+            "java.awt.datatransfer.Transferable",
+            "long",
+            "java.util.Map",
+            "boolean"
+          ]
+        },
+        {
+          "name": "concatData",
+          "parameterTypes": [
+            "java.lang.Object",
+            "java.lang.Object"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.awt.dnd.SunDragSourceContextPeer",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "dragDropFinished",
+          "parameterTypes": [
+            "boolean",
+            "int",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "dragEnter",
+          "parameterTypes": [
+            "int",
+            "int",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "dragExit",
+          "parameterTypes": [
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "dragMotion",
+          "parameterTypes": [
+            "int",
+            "int",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "dragMouseMoved",
+          "parameterTypes": [
+            "int",
+            "int",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "operationChanged",
+          "parameterTypes": [
+            "int",
+            "int",
+            "int",
+            "int"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.awt.dnd.SunDropTargetContextPeer",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "handleDropMessage",
+          "parameterTypes": [
+            "java.awt.Component",
+            "int",
+            "int",
+            "int",
+            "int",
+            "long[]",
+            "long"
+          ]
+        },
+        {
+          "name": "handleEnterMessage",
+          "parameterTypes": [
+            "java.awt.Component",
+            "int",
+            "int",
+            "int",
+            "int",
+            "long[]",
+            "long"
+          ]
+        },
+        {
+          "name": "handleExitMessage",
+          "parameterTypes": [
+            "java.awt.Component",
+            "long"
+          ]
+        },
+        {
+          "name": "handleMotionMessage",
+          "parameterTypes": [
+            "java.awt.Component",
+            "int",
+            "int",
+            "int",
+            "int",
+            "long[]",
+            "long"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.awt.windows.WDragSourceContextPeer",
+      "jniAccessible": true
+    },
+    {
+      "type": "sun.awt.windows.WDropTargetContextPeer",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "getWDropTargetContextPeer",
+          "parameterTypes": []
+        },
+        {
+          "name": "getFileStream",
+          "parameterTypes": [
+            "java.lang.String",
+            "long"
+          ]
+        },
+        {
+          "name": "getIStream",
+          "parameterTypes": [
+            "long"
+          ]
+        }
+      ]
+    },
+    {
       "type": "sun.awt.windows.WComponentPeer",
       "jniAccessible": true,
       "fields": [
