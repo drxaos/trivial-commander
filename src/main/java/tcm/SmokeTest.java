@@ -1,5 +1,6 @@
 package tcm;
 
+import java.awt.Component;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -31,6 +32,11 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 
 import org.apache.commons.compress.archivers.cpio.CpioArchiveEntry;
 import org.apache.commons.compress.archivers.cpio.CpioArchiveOutputStream;
@@ -71,6 +77,8 @@ import tcm.ops.LinkJob;
 import tcm.ops.PackJob;
 import tcm.ops.TestJob;
 import tcm.ops.UnpackJob;
+import tcm.ui.FileTable;
+import tcm.ui.FileTableModel;
 import tcm.ui.IconImages;
 import tcm.ui.SvgImages;
 import tcm.util.Diff;
@@ -336,6 +344,7 @@ public final class SmokeTest {
         checkPlatform(root);
         checkDesktopEntry(root);
         checkWindowsMenuEntry(root);
+        checkRenameSelection(root);
     }
 
     /** The menu entry an AppImage writes for itself, and when it leaves the menu to another integration. */
@@ -434,6 +443,115 @@ public final class SmokeTest {
             // Third launch: up to date with new path
             check(WindowsMenuEntry.reconcile(exe2, winDir) == WindowsMenuEntry.Status.UP_TO_DATE, "windows menu: third launch up to date");
         }
+    }
+
+    /** In-place rename in panel: F2 / Shift+F6 toggles between base name and full name. */
+    private static void checkRenameSelection(final @NotNull Path root) throws Exception {
+        final FileTableModel model = new FileTableModel();
+        final Path testFile = Files.writeString(root.resolve("document.long.name.txt"), "hello");
+        final Path testDir = Files.createDirectories(root.resolve("sub.dir.name"));
+        final Path noExtFile = Files.writeString(root.resolve("Makefile"), "all:");
+        final Path dotFile = Files.writeString(root.resolve(".gitignore"), "*.class");
+
+        final VFile vfFile = Vfs.stat(testFile);
+        final VFile vfDir = Vfs.stat(testDir);
+        final VFile vfNoExt = Vfs.stat(noExtFile);
+        final VFile vfDot = Vfs.stat(dotFile);
+
+        model.setFiles(List.of(vfFile, vfDir, vfNoExt, vfDot), false);
+        final FileTable table = new FileTable(model);
+
+        // 1. Regular file with extension
+        final int fileRow = model.indexOf(vfFile.getName());
+        table.setCursorRow(fileRow);
+        check(table.getValueAt(fileRow, FileTableModel.COL_EXT).equals("txt"), "initially Ext column is txt");
+        table.startRename(fileRow, (name, move) -> { });
+        final JTextField field = table.getRenameField();
+        check(field != null, "rename field created");
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "document.long.name".length(), "initially base name selected");
+        check(table.getValueAt(fileRow, FileTableModel.COL_EXT).equals(""), "Ext column empty during rename");
+        final Component extComp = table.prepareRenderer(table.getCellRenderer(fileRow, FileTableModel.COL_EXT), fileRow, FileTableModel.COL_EXT);
+        check(extComp instanceof JLabel && ((JLabel) extComp).getText().isEmpty(), "Ext renderer empty during rename");
+
+        final javax.swing.Action f2Action = field.getActionMap().get(field.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke("F2")));
+        check(f2Action != null, "F2 action bound in rename field");
+        final javax.swing.Action shiftF6Action = field.getActionMap().get(field.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke("shift F6")));
+        check(shiftF6Action != null, "Shift+F6 action bound in rename field");
+
+        // F2 when base name selected -> selects full name
+        f2Action.actionPerformed(null);
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "document.long.name.txt".length(), "F2 selects whole name when part selected");
+
+        // F2 when full name selected -> selects base name
+        f2Action.actionPerformed(null);
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "document.long.name".length(), "F2 selects base name when whole selected");
+
+        // F2 from arbitrary partial selection -> selects full name
+        field.select(2, 6);
+        f2Action.actionPerformed(null);
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "document.long.name.txt".length(), "F2 selects whole name from arbitrary selection");
+
+        // F2 from no selection (caret at offset) -> selects full name
+        field.setCaretPosition(5);
+        f2Action.actionPerformed(null);
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "document.long.name.txt".length(), "F2 selects whole name from caret position");
+
+        // Shift+F6 also toggles: currently whole name is selected -> selects base name
+        shiftF6Action.actionPerformed(null);
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "document.long.name".length(), "Shift+F6 selects base name when whole selected");
+
+        // After editing text in the field: derives base name from current text
+        field.setText("new_archive.tar.gz");
+        field.select(0, "new_archive.tar.gz".length());
+        f2Action.actionPerformed(null);
+        check(field.getSelectionStart() == 0 && field.getSelectionEnd() == "new_archive.tar".length(), "F2 selects base name of edited text");
+
+        table.stopRename();
+        check(table.getValueAt(fileRow, FileTableModel.COL_EXT).equals("txt"), "Ext column restored after stopRename");
+        final Component extCompRestored = table.prepareRenderer(table.getCellRenderer(fileRow, FileTableModel.COL_EXT), fileRow, FileTableModel.COL_EXT);
+        check(extCompRestored instanceof JLabel && ((JLabel) extCompRestored).getText().equals("txt"), "Ext renderer restored after stopRename");
+
+        // 2. Directory
+        final int dirRow = model.indexOf(vfDir.getName());
+        table.setCursorRow(dirRow);
+        table.startRename(dirRow, (name, move) -> { });
+        final JTextField dirField = table.getRenameField();
+        check(dirField != null && dirField.getSelectionStart() == 0 && dirField.getSelectionEnd() == "sub.dir.name".length(),
+            "directory initially whole name selected");
+        final javax.swing.Action dirF2 = dirField.getActionMap().get(dirField.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke("F2")));
+        dirField.select(1, 4);
+        dirF2.actionPerformed(null);
+        check(dirField.getSelectionStart() == 0 && dirField.getSelectionEnd() == "sub.dir.name".length(),
+            "directory F2 selects whole name when part selected");
+        table.stopRename();
+
+        // 3. File without extension
+        final int noExtRow = model.indexOf(vfNoExt.getName());
+        table.setCursorRow(noExtRow);
+        table.startRename(noExtRow, (name, move) -> { });
+        final JTextField noExtField = table.getRenameField();
+        check(noExtField != null && noExtField.getSelectionStart() == 0 && noExtField.getSelectionEnd() == "Makefile".length(),
+            "no-ext initially whole name selected");
+        final javax.swing.Action noExtF2 = noExtField.getActionMap().get(noExtField.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke("F2")));
+        noExtField.select(0, 4);
+        noExtF2.actionPerformed(null);
+        check(noExtField.getSelectionStart() == 0 && noExtField.getSelectionEnd() == "Makefile".length(),
+            "no-ext F2 selects whole name when part selected");
+        table.stopRename();
+
+        // 4. Dotfile
+        final int dotRow = model.indexOf(vfDot.getName());
+        table.setCursorRow(dotRow);
+        table.startRename(dotRow, (name, move) -> { });
+        final JTextField dotField = table.getRenameField();
+        check(dotField != null && dotField.getSelectionStart() == 0 && dotField.getSelectionEnd() == ".gitignore".length(),
+            "dotfile initially whole name selected");
+        final javax.swing.Action dotF2 = dotField.getActionMap().get(dotField.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke("F2")));
+        dotField.select(1, 5);
+        dotF2.actionPerformed(null);
+        check(dotField.getSelectionStart() == 0 && dotField.getSelectionEnd() == ".gitignore".length(),
+            "dotfile F2 selects whole name when part selected");
+        table.stopRename();
     }
 
     /** Behavior that differs between OSes: deleting read-only files, the command line (spaces, console encoding), attributes. */

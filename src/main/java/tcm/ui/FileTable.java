@@ -65,7 +65,10 @@ public final class FileTable extends JTable {
     private boolean thumbs;
     @Getter
     private boolean brief;
+    @Getter
     private @Nullable JTextField renameField;
+    @Getter
+    private int renameRow = -1;
     private @Nullable MouseFilter mouseFilter;
     private int dropRow = -1;
 
@@ -291,6 +294,7 @@ public final class FileTable extends JTable {
         bindRename(field, "DOWN", () -> finishRename(field, commit, 1));
         bindRename(field, "ESCAPE", cancel);
         bindRename(field, "shift F6", () -> toggleSelection(field, f));
+        bindRename(field, "F2", () -> toggleSelection(field, f));
         field.addFocusListener(new FocusAdapter() {
             @Override
             public void focusLost(final FocusEvent e) {
@@ -299,6 +303,7 @@ public final class FileTable extends JTable {
                 }
             }
         });
+        renameRow = row;
         renameField = field;
         add(field);
         field.requestFocusInWindow();
@@ -312,10 +317,20 @@ public final class FileTable extends JTable {
     public void stopRename() {
         final JTextField field = renameField;
         renameField = null;
+        renameRow = -1;
         if (field != null) {
             remove(field);
             repaint();
         }
+    }
+
+    @Override
+    public Object getValueAt(final int row, final int column) {
+        if (convertColumnIndexToModel(column) == FileTableModel.COL_EXT && isRenaming() && row == renameRow) {
+            return "";
+        }
+
+        return super.getValueAt(row, column);
     }
 
     private void finishRename(final @NotNull JTextField field, final @NotNull BiConsumer<String, Integer> commit, final int move) {
@@ -336,13 +351,14 @@ public final class FileTable extends JTable {
         return label.getInsets().left + (icon == null ? 0 : icon.getIconWidth() + label.getIconTextGap());
     }
 
-    private static void selectBaseName(final @NotNull JTextField field, final @NotNull VFile f) {
-        final int dot = f.isDirectory() ? -1 : f.getName().lastIndexOf('.');
-        field.select(0, dot > 0 ? dot : f.getName().length());
+    static void selectBaseName(final @NotNull JTextField field, final @NotNull VFile f) {
+        final String text = field.getText();
+        final int dot = f.isDirectory() ? -1 : text.lastIndexOf('.');
+        field.select(0, dot > 0 ? dot : text.length());
     }
 
-    /** Shift+F6 in the field: name without extension ↔ whole name. */
-    private static void toggleSelection(final @NotNull JTextField field, final @NotNull VFile f) {
+    /** F2/Shift+F6 in the field: name without extension ↔ whole name. */
+    static void toggleSelection(final @NotNull JTextField field, final @NotNull VFile f) {
         final int len = field.getText().length();
         if (field.getSelectionStart() == 0 && field.getSelectionEnd() == len) {
             selectBaseName(field, f);
@@ -420,6 +436,8 @@ public final class FileTable extends JTable {
             if (modelCol == FileTableModel.COL_NAME) {
                 setText(nameText(f));
                 setIcon(iconFor(f));
+            } else if (modelCol == FileTableModel.COL_EXT && isRenaming() && row == renameRow) {
+                setText("");
             }
             // the color is set explicitly every time: DefaultTableCellRenderer remembers setForeground for subsequent cells
             if (fileModel.isMarked(f)) {
