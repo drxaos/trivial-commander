@@ -59,6 +59,7 @@ import tcm.core.AppImageDesktopEntry;
 import tcm.core.WindowsMenuEntry;
 import tcm.core.ArchiveFormat;
 import tcm.core.DirWatcher;
+import tcm.core.EmbeddedArchives;
 import tcm.core.FileAttrs;
 import tcm.core.PasswordCancelledException;
 import tcm.core.Passwords;
@@ -359,6 +360,7 @@ public final class SmokeTest {
         checkEncryptedArchives(root);
         checkArchiveAttributes(root);
         checkNestedArchives(root);
+        checkEmbeddedArchives(root);
         checkWatcher(root);
         checkUtils();
         checkPlatform(root);
@@ -768,6 +770,92 @@ public final class SmokeTest {
         Vfs.releaseNested(tmp);
         check(!Files.exists(tmp) && !Files.exists(tmp.getParent()), "nested temporary file deleted");
         check(Vfs.openNested(Vfs.file(outer + "!/plain.txt")) == null, "non-archive entry is not opened as nested");
+    }
+
+    /**
+     * Ctrl+PgDn on a file that is not an archive: an archive starting in its first 10 MB is found past program code with fake
+     * signatures in it — a ZIP is read in place, other formats are cut out into a temporary copy; both are read-only.
+     */
+    private static void checkEmbeddedArchives(final @NotNull Path root) throws Exception {
+        final ByteArrayOutputStream stub = new ByteArrayOutputStream();
+        final byte[] noise = new byte[5000];
+        new Random(7).nextBytes(noise);
+        stub.write(noise);
+        stub.write("PK\3\4 Rar!\u001A\u0007\0 7z\u00BC\u00AF\u0027\u001C MSCF\0\0\0\0 BZh9 ".getBytes(StandardCharsets.ISO_8859_1));
+        stub.write(new byte[] {0x1F, (byte) 0x8B, 8, 0, (byte) 0xFD, '7', 'z', 'X', 'Z', 0});
+        check(Files.write(root.resolve("program.exe"), stub.toByteArray()) != null
+            && Vfs.openEmbedded(Vfs.stat(root.resolve("program.exe")), Progress.NONE) == null, "fake signatures are not archives");
+
+        final ByteArrayOutputStream zip = new ByteArrayOutputStream();
+        try (ZipOutputStream z = new ZipOutputStream(zip)) {
+            z.putNextEntry(new ZipEntry("z/a.txt"));
+            z.write(FIXTURE.getBytes(StandardCharsets.UTF_8));
+            z.closeEntry();
+        }
+        final Path zipSfx = Files.write(root.resolve("zipsfx.exe"), concat(stub.toByteArray(), zip.toByteArray()));
+        check(failsWithIo(() -> Vfs.archiveDir(zipSfx, "")), "zip sfx is not an archive by itself");
+        final Path inPlace = Vfs.openEmbedded(Vfs.stat(zipSfx), Progress.NONE);
+        check(zipSfx.equals(inPlace) && read(zipSfx + "!/z/a.txt").equals(FIXTURE), "zip sfx read in place");
+        check(failsWithIo(() -> Vfs.checkWritable(zipSfx)), "zip sfx is read-only");
+        check(Vfs.parent(Vfs.archiveDir(zipSfx, "")).equals(Vfs.stat(root)), "zip sfx parent");
+
+        final ByteArrayOutputStream tgz = new ByteArrayOutputStream();
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new GZIPOutputStream(tgz))) {
+            final TarArchiveEntry e = new TarArchiveEntry("t/b.txt");
+            e.setSize(FIXTURE.length());
+            tar.putArchiveEntry(e);
+            tar.write(FIXTURE.getBytes(StandardCharsets.UTF_8));
+            tar.closeArchiveEntry();
+        }
+        final byte[] script = "#!/bin/sh\ntail -c +123 \"$0\" | tar xzf -\nexit 0\n".getBytes(StandardCharsets.US_ASCII);
+        final Path run = Files.write(root.resolve("setup.run"), concat(script, tgz.toByteArray()));
+        final Path cut = Vfs.openEmbedded(Vfs.stat(run), Progress.NONE);
+        check(cut != null && !cut.equals(run) && Vfs.index(cut).getFormat() == ArchiveFormat.TAR_GZ, "makeself tar.gz cut out");
+        check(read(cut + "!/t/b.txt").equals(FIXTURE), "makeself tar.gz read");
+        check(Vfs.displayLocation(Vfs.archiveDir(cut, "t")).equals(run + "!/t"), "embedded display location");
+        check(Vfs.parent(Vfs.archiveDir(cut, "")).equals(Vfs.stat(root)), "embedded parent is the file's directory");
+        check(Vfs.diskPath(Vfs.archiveDir(cut, "t")).equals(run), "embedded disk path");
+        check(failsWithIo(() -> Vfs.checkWritable(cut)), "embedded copy is read-only");
+        Vfs.retainNested(cut);
+        Vfs.releaseNested(cut);
+        check(!Files.exists(cut), "embedded copy deleted on release");
+
+        final Path sevenZip = root.resolve("payload.7z");
+        try (SevenZOutputFile out = new SevenZOutputFile(sevenZip.toFile())) {
+            final SevenZArchiveEntry file = new SevenZArchiveEntry();
+            file.setName("s/c.txt");
+            file.setSize(FIXTURE.length());
+            out.putArchiveEntry(file);
+            out.write(FIXTURE.getBytes(StandardCharsets.UTF_8));
+            out.closeArchiveEntry();
+        }
+        // a signed installer has its certificate after the archive: only the archive part is copied
+        final byte[] sfx = concat(concat(stub.toByteArray(), Files.readAllBytes(sevenZip)), noise);
+        final Path outer = root.resolve("installers.zip");
+        try (ZipOutputStream z = new ZipOutputStream(Files.newOutputStream(outer))) {
+            z.putNextEntry(new ZipEntry("setup.exe"));
+            z.write(sfx);
+            z.closeEntry();
+        }
+        check(Vfs.openNested(Vfs.file(outer + "!/setup.exe")) == null, "7z sfx in a zip is not an archive by itself");
+        final Path nested = Vfs.openNested(Vfs.file(outer + "!/setup.exe"), Progress.NONE, true);
+        check(nested != null && Files.size(nested) == Files.size(sevenZip) && read(nested + "!/s/c.txt").equals(FIXTURE), "7z sfx in a zip");
+        check(Vfs.displayLocation(Vfs.archiveDir(nested, "s")).equals(outer + "!/setup.exe!/s"), "7z sfx in a zip display location");
+        check(Vfs.parent(Vfs.archiveDir(nested, "")).equals(Vfs.archiveDir(outer, "")), "7z sfx in a zip parent");
+        Vfs.retainNested(nested);
+        Vfs.releaseNested(nested);
+        check(!Files.exists(nested), "7z sfx in a zip copy deleted");
+
+        final byte[] far = new byte[EmbeddedArchives.SEARCH_LIMIT + 1];
+        check(Vfs.openEmbedded(Vfs.stat(Files.write(root.resolve("far.run"), concat(far, tgz.toByteArray()))), Progress.NONE) == null,
+            "archive after 10 MB is not searched");
+    }
+
+    private static byte @NotNull [] concat(final byte @NotNull [] a, final byte @NotNull [] b) {
+        final byte[] result = Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, result, a.length, b.length);
+
+        return result;
     }
 
     private static void checkDosNames(

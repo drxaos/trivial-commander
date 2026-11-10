@@ -116,6 +116,12 @@ The Linux archives are skipped on Windows.
   it is browsed as an archive.
   `Ctrl+PgDn` opens any file as an archive: the format is detected by signature (`.docx`, `.apk`, `.cbr`...).
   `Enter`/double click on a file without an associated program does the same.
+  A file that does not open as an archive is searched by `Ctrl+PgDn` for one starting in its first 10 MB: self-extracting programs
+  (ZIP, RAR, 7z, cabinet after the extractor code), makeself-style `.run`/`.sh` installers (a script followed by a TAR, tar.gz,
+  tar.bz2, tar.xz or a single .gz), and a squashfs, ISO, MSI or `.deb` appended to a program. Each signature found is checked
+  by its header checksum or structure, so the same bytes in program code are skipped. A ZIP is read in place; other formats are
+  copied into a temporary file in the background, like a nested archive. Such an archive is read-only; the path is shown as
+  `setup.exe!/dir`. Test samples: `ar/make-embedded.sh` → `ar/embedded/`.
   Entry names with `..` are trimmed, so unpacking cannot escape the target directory.
 - **Encrypted archives**: ZIP (WinZip AES and the traditional ZipCrypto), RAR (encrypted files and encrypted headers)
   and 7z (encrypted contents and headers). The password is asked in a dialog when the archive is entered (encrypted headers)

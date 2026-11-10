@@ -46,6 +46,11 @@ public final class Vfs {
     private static final Map<Path, ArchiveIndex> ARCHIVES = new ConcurrentHashMap<>();
     /** Archives unpacked from other archives: temporary copy → the entry it came from. */
     private static final Map<Path, Nested> NESTED = new ConcurrentHashMap<>();
+    /**
+     * Archives found inside other files (see EmbeddedArchives) → their format, which neither the name nor the signature at the start
+     * gives: a file with a ZIP appended (read in place) or the temporary copy of the archive part.
+     */
+    private static final Map<Path, ArchiveFormat> EMBEDDED = new ConcurrentHashMap<>();
 
     private Vfs() {
     }
@@ -140,9 +145,15 @@ public final class Vfs {
         if (file.isInArchive()) {
             if (file.getEntry().isEmpty()) {
                 final Nested nested = NESTED.get(file.getHostPath());
-                if (nested != null) {
+                if (nested != null && nested.origin.isInArchive()) {
                     // from the root of a nested archive — into the directory of the outer archive where it lies
                     return archiveDir(nested.origin.getHostPath(), ArchiveIndex.parentOf(nested.origin.getEntry()));
+                }
+                if (nested != null) {
+                    // an archive cut out of a local file — into the directory of that file
+                    final Path parent = nested.origin.getHostPath().getParent();
+
+                    return parent == null ? null : stat(parent);
                 }
                 final Path parent = file.getHostPath().getParent();
 
@@ -231,6 +242,9 @@ public final class Vfs {
 
     /** Only ZIP/JAR can be modified; for other formats a write operation is rejected before it starts. */
     public static void checkWritable(final @NotNull Path archive) throws IOException {
+        if (EMBEDDED.containsKey(archive.toAbsolutePath().normalize())) {
+            throw new IOException("Archive inside a file is read-only: " + archive.getFileName());
+        }
         if (NESTED.containsKey(archive.toAbsolutePath().normalize())) {
             throw new IOException("Archive inside an archive is read-only: " + archive.getFileName());
         }
@@ -258,7 +272,7 @@ public final class Vfs {
             && cached.getArchiveSize() == Files.size(key)) {
             return cached;
         }
-        final ArchiveIndex index = ArchiveIndex.load(key);
+        final ArchiveIndex index = ArchiveIndex.load(key, EMBEDDED.get(key));
         final ArchiveIndex old = ARCHIVES.put(key, index);
         if (old != null) {
             old.dispose();
@@ -285,27 +299,160 @@ public final class Vfs {
 
     /** The same with progress and cancellation (a partition of a disk image may take gigabytes). */
     public static @Nullable Path openNested(final @NotNull VFile entry, final @NotNull Progress progress) throws IOException {
+        return openNested(entry, progress, false);
+    }
+
+    /**
+     * The same; searchEmbedded — an entry that does not open as an archive is searched for an archive inside it
+     * (Ctrl+PgDn, see {@link #openEmbedded}).
+     */
+    public static @Nullable Path openNested(
+        final @NotNull VFile entry,
+        final @NotNull Progress progress,
+        final boolean searchEmbedded
+    ) throws IOException {
         if (!mayBeNestedArchive(entry)) {
             return null;
         }
-        final Path dir = Files.createTempDirectory("tcm-nested-");
-        final Path tmp = dir.resolve(entry.getName());
-        // deleteOnExit deletes in reverse order: the file first, then its directory
-        dir.toFile().deleteOnExit();
-        tmp.toFile().deleteOnExit();
+        final Path tmp = nestedTemp(entry.getName());
         try {
             progress.file(entry.getName(), entry.getSize());
             unpackNested(entry, tmp, progress);
-            if (ArchiveFormat.forFile(tmp) == null) {
-                deleteNested(tmp);
+            if (ArchiveFormat.forFile(tmp) == null || searchEmbedded && !opens(tmp)) {
+                final Path found = searchEmbedded ? openEmbedded(entry, tmp, Progress.ticksOnly(progress)) : null;
+                if (!tmp.equals(found)) {
+                    deleteNested(tmp);
+                }
 
-                return null;
+                return found;
             }
         } catch (final IOException | RuntimeException e) {
             deleteNested(tmp);
             throw e;
         }
         NESTED.put(tmp, new Nested(entry));
+
+        return tmp;
+    }
+
+    /**
+     * A local file that does not open as an archive is searched for one starting in its first 10 MB (a self-extracting program,
+     * a makeself installer): the path to open as an archive — the file itself for a ZIP (read in place), otherwise a temporary copy
+     * of the archive part, deleted like a nested archive ({@link #releaseNested}); null — none found. Such an archive is read-only.
+     */
+    public static @Nullable Path openEmbedded(final @NotNull VFile file, final @NotNull Progress progress) throws IOException {
+        return openEmbedded(file, file.getHostPath(), progress);
+    }
+
+    /** The archives found in host (the file itself or its unpacked copy) are tried by offset; the first that opens wins. */
+    private static @Nullable Path openEmbedded(
+        final @NotNull VFile origin,
+        final @NotNull Path host,
+        final @NotNull Progress progress
+    ) throws IOException {
+        for (final EmbeddedArchives.Found found : EmbeddedArchives.find(host)) {
+            final Path path = found.getFormat() == ArchiveFormat.ZIP ? openEmbeddedZip(host) : cutEmbedded(origin, host, found, progress);
+            if (path != null) {
+                if (origin.isInArchive() || !path.equals(host)) {
+                    NESTED.put(path, new Nested(origin));
+                }
+
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static @Nullable Path openEmbeddedZip(final @NotNull Path host) {
+        final Path key = host.toAbsolutePath().normalize();
+        EMBEDDED.put(key, ArchiveFormat.ZIP);
+        invalidate(key);
+        if (opens(key)) {
+            return key;
+        }
+        EMBEDDED.remove(key);
+
+        return null;
+    }
+
+    /** Copies the archive part of host into a temporary file named as the origin; null — it does not open as an archive. */
+    private static @Nullable Path cutEmbedded(
+        final @NotNull VFile origin,
+        final @NotNull Path host,
+        final @NotNull EmbeddedArchives.Found found,
+        final @NotNull Progress progress
+    ) throws IOException {
+        final Path tmp = nestedTemp(origin.getName());
+        try {
+            try (FileChannel in = FileChannel.open(host, StandardOpenOption.READ)) {
+                final long length = found.getLength() < 0 ? in.size() - found.getOffset() : found.getLength();
+                progress.file(origin.getName(), length);
+                copyRange(in, found.getOffset(), length, tmp, progress);
+            }
+            // the signature at the start of the copy tells a tar.gz from a single .gz, an ISO from its system area
+            final ArchiveFormat format = ArchiveFormat.detect(tmp);
+            if (format != null) {
+                EMBEDDED.put(tmp, format);
+                if (opens(tmp)) {
+                    return tmp;
+                }
+                EMBEDDED.remove(tmp);
+            }
+        } catch (final IOException | RuntimeException e) {
+            EMBEDDED.remove(tmp);
+            deleteNested(tmp);
+            throw e;
+        }
+        deleteNested(tmp);
+
+        return null;
+    }
+
+    private static void copyRange(
+        final @NotNull FileChannel in,
+        final long offset,
+        final long length,
+        final @NotNull Path target,
+        final @NotNull Progress progress
+    ) throws IOException {
+        final ByteBuffer buf = ByteBuffer.allocate(COPY_BUFFER);
+        try (FileChannel out = FileChannel.open(target, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+            long done = 0;
+            while (done < length) {
+                buf.clear().limit((int) Math.min(COPY_BUFFER, length - done));
+                final int n = in.read(buf, offset + done);
+                if (n < 0) {
+                    break;
+                }
+                buf.flip();
+                while (buf.hasRemaining()) {
+                    out.write(buf);
+                }
+                done += n;
+                progress.bytes(n);
+            }
+        }
+    }
+
+    /** The archive is read (its index is built and cached); an archive that fails to open is only no archive. */
+    private static boolean opens(final @NotNull Path archive) {
+        try {
+            index(archive);
+
+            return true;
+        } catch (final IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** A new temporary file path with the given name, in a directory of its own (several archives may have one name). */
+    private static @NotNull Path nestedTemp(final @NotNull String name) throws IOException {
+        final Path dir = Files.createTempDirectory("tcm-nested-");
+        final Path tmp = dir.resolve(name);
+        // deleteOnExit deletes in reverse order: the file first, then its directory
+        dir.toFile().deleteOnExit();
+        tmp.toFile().deleteOnExit();
 
         return tmp;
     }
@@ -448,6 +595,7 @@ public final class Vfs {
     }
 
     private static void deleteNested(final @NotNull Path tmp) {
+        EMBEDDED.remove(tmp);
         try {
             Files.deleteIfExists(tmp);
             Files.deleteIfExists(tmp.getParent());

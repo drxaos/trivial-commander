@@ -71,9 +71,14 @@ public final class ArchiveIndex {
     }
 
     public static @NotNull ArchiveIndex load(final @NotNull Path archive) throws IOException {
+        return load(archive, null);
+    }
+
+    /** known — the format found by a search inside the file (see EmbeddedArchives); null — by the name, then by the signature. */
+    public static @NotNull ArchiveIndex load(final @NotNull Path archive, final @Nullable ArchiveFormat known) throws IOException {
         final long modified = Files.getLastModifiedTime(archive).toMillis();
         final long size = Files.size(archive);
-        final ArchiveFormat format = refine(archive, ArchiveFormat.forFile(archive));
+        final ArchiveFormat format = known != null ? known : refine(archive, ArchiveFormat.forFile(archive));
         if (format == null) {
             throw new IOException("Not an archive or unsupported format: " + archive.getFileName());
         }

@@ -616,7 +616,10 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         showError("No application is associated with " + f.getName(), null);
     }
 
-    /** Ctrl+PgDn: the file is opened as an archive regardless of extension (format detected by signature). */
+    /**
+     * Ctrl+PgDn: the file is opened as an archive regardless of extension (format detected by signature); a file that does not open
+     * is searched for an archive starting in its first 10 MB (a self-extracting program, an installer with an archive appended).
+     */
     public void openCursorAsArchive() {
         final VFile f = getCursorFile();
         if (f == null || f.isParentLink() || f.isDirectory()) {
@@ -624,20 +627,34 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
             return;
         }
-        openArchive(f);
+        openArchive(f, true);
     }
 
     /** A file on disk or an archive inside an archive (unpacked into a temporary file while the tab is inside it). */
     public void openArchive(final @NotNull VFile f) {
+        openArchive(f, false);
+    }
+
+    private void openArchive(final @NotNull VFile f, final boolean searchEmbedded) {
         try {
             if (f.isLocal()) {
                 navigate(Vfs.archiveDir(f.getHostPath(), ""), null, true);
             } else {
-                openNested(f, "Not an archive or unsupported format: " + f.getName());
+                openNested(f, "Not an archive or unsupported format: " + f.getName(), searchEmbedded);
             }
         } catch (final IOException e) {
-            showError("Cannot open archive " + Vfs.displayLocation(f), e);
+            if (searchEmbedded && f.isLocal()) {
+                openEmbedded(f, e);
+            } else {
+                showError("Cannot open archive " + Vfs.displayLocation(f), e);
+            }
         }
+    }
+
+    /** Searches a local file that is not an archive for one inside it in the background; failure — the error of the plain opening. */
+    private void openEmbedded(final @NotNull VFile f, final @NotNull IOException notArchive) {
+        final String error = "Cannot open archive " + Vfs.displayLocation(f);
+        openInBackground("Searching for an archive in " + f.getName(), f, ctx -> Vfs.openEmbedded(f, ctx), () -> showError(error, notArchive));
     }
 
     /**
@@ -646,22 +663,41 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
      * turns out not to be an archive.
      */
     private void openNested(final @NotNull VFile f, final @NotNull String notArchive) throws IOException {
+        openNested(f, notArchive, false);
+    }
+
+    /** searchEmbedded — an entry that is not an archive is searched for one inside it (Ctrl+PgDn). */
+    private void openNested(final @NotNull VFile f, final @NotNull String notArchive, final boolean searchEmbedded) throws IOException {
         if (!Vfs.mayBeNestedArchive(f)) {
             showError(notArchive, null);
 
             return;
         }
+        openInBackground("Unpacking " + f.getName(), f, ctx -> Vfs.openNested(f, ctx, searchEmbedded), () -> showError(notArchive, null));
+    }
+
+    /**
+     * Prepares the archive to enter in the background (unpacks or cuts it out into a temporary file, reads its tree) and enters it,
+     * unless the tab has moved elsewhere meanwhile; notArchive — called when open finds no archive. A temporary copy nobody shows
+     * is deleted.
+     */
+    private void openInBackground(
+        final @NotNull String title,
+        final @NotNull VFile f,
+        final @NotNull ArchiveOpener open,
+        final @NotNull Runnable notArchive
+    ) {
         if (!confirmTempSpace(f)) {
             return;
         }
         final VFile from = dir;
         final AtomicReference<Path> result = new AtomicReference<>();
         final AtomicBoolean finished = new AtomicBoolean();
-        final Job job = new Job("Unpacking " + f.getName()) {
+        final Job job = new Job(title) {
             @Override
             public void run(final @NotNull JobContext ctx) throws Exception {
                 ctx.setTotal(f.getSize());
-                final Path tmp = Vfs.openNested(f, ctx);
+                final Path tmp = open.open(ctx);
                 result.set(tmp);
                 if (tmp != null) {
                     // the file system tree is read here, not on the event thread
@@ -674,7 +710,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             final Path tmp = result.get();
             if (tmp == null) {
                 if (finished.get()) {
-                    showError(notArchive, null);
+                    notArchive.run();
                 }
 
                 return;
@@ -1205,5 +1241,12 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     /** Menu of the current directory (right button on empty space). */
     public void showDirMenu(final @NotNull Point at) {
         owner.getHost().createDirMenu(this).show(table, at.x, at.y);
+    }
+
+    /** Produces the archive to enter: a temporary copy or the file itself; null — no archive. */
+    @FunctionalInterface
+    private interface ArchiveOpener {
+
+        @Nullable Path open(@NotNull JobContext ctx) throws IOException;
     }
 }
