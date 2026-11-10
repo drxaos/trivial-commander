@@ -34,7 +34,9 @@ public enum ArchiveFormat {
     /** An Apple disk image (UDIF). */
     DMG(false, ".dmg"),
     /** A raw disk image: a bare file system or a disk with an MBR/GPT partition table (see DiskImages). */
-    DISK_IMAGE(false, ".img", ".ima", ".vfd", ".raw", ".hfs", ".hfsx", ".apfs"),
+    DISK_IMAGE(false, ".img", ".ima", ".vfd", ".raw", ".dd", ".hfs", ".hfsx", ".apfs"),
+    /** A virtual machine disk: VirtualBox, Hyper-V, VMware, QEMU, Parallels (see VirtualDisks). */
+    VIRTUAL_DISK(false, ".vdi", ".vhd", ".vhdx", ".vmdk", ".qcow", ".qcow2", ".qed", ".hdd", ".hds"),
     /** A Debian package: an ar archive with control.tar and data.tar. */
     DEB(false, ".deb", ".udeb"),
     /** An RPM package: headers and a compressed cpio payload. */
@@ -151,6 +153,10 @@ public enum ArchiveFormat {
             return TAR;
         }
 
+        if (VirtualDisks.matches(head)) {
+            return VIRTUAL_DISK;
+        }
+
         if (isIso(file)) {
             return ISO;
         }
@@ -161,6 +167,10 @@ public enum ArchiveFormat {
 
         if (DiskImages.matches(file)) {
             return DISK_IMAGE;
+        }
+
+        if (VirtualDisks.matches(file)) {
+            return VIRTUAL_DISK;
         }
 
         return PakArchives.matches(file) ? PAK : null;

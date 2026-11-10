@@ -24,7 +24,8 @@ import org.jetbrains.annotations.Nullable;
 import lombok.Getter;
 
 /**
- * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg, raw disk images,
+ * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg, raw and virtual
+ * machine disk images,
  * .deb and .rpm packages, CHM help, MSI packages, cabinets, single .gz/.bz2/.xz files).
  * Directories not explicitly present in the archive are reconstructed from file paths.
  */
@@ -88,6 +89,7 @@ public final class ArchiveIndex {
             case PAK -> PakArchives.load(index);
             case DMG -> DmgArchives.load(index);
             case DISK_IMAGE -> DiskImages.load(index);
+            case VIRTUAL_DISK -> VirtualDisks.load(index);
             case DEB -> DebArchives.load(index);
             case RPM -> RpmArchives.load(index);
             case CHM -> ChmArchives.load(index);
@@ -100,7 +102,7 @@ public final class ArchiveIndex {
         return index;
     }
 
-    /** An .img file is often an ISO, a DMG or a squashfs image under another name: the signature decides. */
+    /** An .img file is often an ISO, a DMG, a qcow2 or a squashfs image under another name: the signature decides. */
     private static @Nullable ArchiveFormat refine(final @NotNull Path archive, final @Nullable ArchiveFormat format) throws IOException {
         if (format != ArchiveFormat.DISK_IMAGE) {
             return format;
@@ -370,6 +372,11 @@ public final class ArchiveIndex {
             @Override
             public @NotNull InputStream open(final @NotNull String entry) throws IOException {
                 return shared.open(entry);
+            }
+
+            @Override
+            public @Nullable BlockSource source(final @NotNull String entry) throws IOException {
+                return shared.source(entry);
             }
 
             @Override

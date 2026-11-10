@@ -3,6 +3,9 @@ package tcm.core;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileStore;
@@ -18,6 +21,7 @@ import java.nio.file.attribute.DosFileAttributes;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +41,7 @@ public final class Vfs {
 
     public static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "bmp", "wbmp", "ico", "icns", "svg", "svgz");
 
+    private static final int COPY_BUFFER = 1 << 20;
     private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     private static final Map<Path, ArchiveIndex> ARCHIVES = new ConcurrentHashMap<>();
     /** Archives unpacked from other archives: temporary copy → the entry it came from. */
@@ -275,15 +280,22 @@ public final class Vfs {
      * {@link #releaseNested} after {@link #retainNested}.
      */
     public static @Nullable Path openNested(final @NotNull VFile entry) throws IOException {
+        return openNested(entry, Progress.NONE);
+    }
+
+    /** The same with progress and cancellation (a partition of a disk image may take gigabytes). */
+    public static @Nullable Path openNested(final @NotNull VFile entry, final @NotNull Progress progress) throws IOException {
+        if (!mayBeNestedArchive(entry)) {
+            return null;
+        }
         final Path dir = Files.createTempDirectory("tcm-nested-");
         final Path tmp = dir.resolve(entry.getName());
         // deleteOnExit deletes in reverse order: the file first, then its directory
         dir.toFile().deleteOnExit();
         tmp.toFile().deleteOnExit();
         try {
-            try (InputStream in = openInput(entry)) {
-                Files.copy(in, tmp);
-            }
+            progress.file(entry.getName(), entry.getSize());
+            unpackNested(entry, tmp, progress);
             if (ArchiveFormat.forFile(tmp) == null) {
                 deleteNested(tmp);
 
@@ -296,6 +308,92 @@ public final class Vfs {
         NESTED.put(tmp, new Nested(entry));
 
         return tmp;
+    }
+
+    /**
+     * False if the entry is known not to be an archive without unpacking it: a partition of a disk image with no supported file
+     * system or partition table (a swap or UFS partition would otherwise be copied for nothing).
+     */
+    public static boolean mayBeNestedArchive(final @NotNull VFile entry) throws IOException {
+        if (!entry.isInArchive()) {
+            return true;
+        }
+        try (ArchiveReader reader = openReader(entry.getHostPath())) {
+            final BlockSource source = reader.source(entry.getEntry());
+
+            return source == null || DiskImages.recognizes(source);
+        }
+    }
+
+    private static void unpackNested(final @NotNull VFile entry, final @NotNull Path tmp, final @NotNull Progress progress) throws IOException {
+        try (ArchiveReader reader = openReader(entry.getHostPath())) {
+            final BlockSource source = reader.source(entry.getEntry());
+            if (source != null) {
+                copySparse(source, tmp, progress);
+
+                return;
+            }
+            try (InputStream in = reader.open(entry.getEntry()); OutputStream out = Files.newOutputStream(tmp, StandardOpenOption.CREATE_NEW)) {
+                final byte[] buf = new byte[COPY_BUFFER];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                    progress.bytes(n);
+                }
+            }
+        }
+    }
+
+    /** Writes the bytes into a sparse file: unallocated and all-zero blocks are not written and take no disk space. */
+    public static void copySparse(final @NotNull BlockSource source, final @NotNull Path target, final @NotNull Progress progress) throws IOException {
+        final long size = source.size();
+        final byte[] buf = new byte[COPY_BUFFER];
+        final byte[] zeros = new byte[COPY_BUFFER];
+        try (FileChannel out = FileChannel.open(target, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.SPARSE)) {
+            long pos = 0;
+            long written = 0;
+            while (pos < size) {
+                final long data = Math.max(pos, source.dataFrom(pos));
+                if (data >= size) {
+                    progress.bytes(size - pos);
+                    break;
+                }
+                // whole buffers aligned to the buffer size: the holes of a virtual disk start at block boundaries
+                final long from = data - data % COPY_BUFFER;
+                if (from > pos) {
+                    progress.bytes(from - pos);
+                    pos = from;
+                }
+                final int n = (int) Math.min(COPY_BUFFER, size - pos);
+                source.read(pos, buf, 0, n);
+                if (Arrays.mismatch(buf, 0, n, zeros, 0, n) >= 0) {
+                    final ByteBuffer b = ByteBuffer.wrap(buf, 0, n);
+                    while (b.hasRemaining()) {
+                        out.write(b, pos + b.position());
+                    }
+                    written = pos + n;
+                }
+                pos += n;
+                progress.bytes(n);
+            }
+            if (written < size && size > 0) {
+                // the file gets its full length even when it ends with a hole
+                out.write(ByteBuffer.wrap(new byte[1]), size - 1);
+            }
+        }
+    }
+
+    /** Usable bytes in the directory of temporary files, where nested archives are unpacked; -1 — unknown. */
+    public static long tempFreeSpace() {
+        try {
+            return Files.getFileStore(tempDir()).getUsableSpace();
+        } catch (final IOException | RuntimeException e) {
+            return -1;
+        }
+    }
+
+    public static @NotNull Path tempDir() {
+        return Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath();
     }
 
     /** One more panel shows the nested archive. */

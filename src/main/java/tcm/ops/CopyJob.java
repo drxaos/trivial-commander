@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import tcm.core.ArchiveIndex;
 import tcm.core.ArchiveReader;
+import tcm.core.BlockSource;
 import tcm.core.FileAttrs;
 import tcm.core.Progress;
 import tcm.core.Streams;
@@ -167,9 +168,16 @@ public final class CopyJob extends Job {
             return;
         }
         ctx.file(src.getLocation(), src.getSize());
-        try (InputStream in = open(src);
-             OutputStream out = Files.newOutputStream(dst)) {
-            Streams.copy(in, out, ctx);
+        final BlockSource partition = src.isInArchive() ? reader(src).source(src.getEntry()) : null;
+        if (partition != null) {
+            // a partition of a disk image: written sparse, its unallocated gigabytes take no disk space
+            Files.deleteIfExists(dst);
+            Vfs.copySparse(partition, dst, ctx);
+        } else {
+            try (InputStream in = open(src);
+                 OutputStream out = Files.newOutputStream(dst)) {
+                Streams.copy(in, out, ctx);
+            }
         }
         Files.setLastModifiedTime(dst, FileTime.fromMillis(src.getModified()));
         if (src.isInArchive()) {
@@ -392,13 +400,17 @@ public final class CopyJob extends Job {
         if (src.isLocal()) {
             return Files.newInputStream(src.getHostPath());
         }
+        return reader(src).open(src.getEntry());
+    }
+
+    private @NotNull ArchiveReader reader(final @NotNull VFile src) throws IOException {
         ArchiveReader reader = openArchives.get(src.getHostPath());
         if (reader == null) {
             reader = Vfs.openReader(src.getHostPath());
             openArchives.put(src.getHostPath(), reader);
         }
 
-        return reader.open(src.getEntry());
+        return reader;
     }
 
     private void closeArchives() {

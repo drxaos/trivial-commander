@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -22,10 +23,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Raw disk images (.img) — read only: a bare file system or a disk with an MBR or GPT partition table. Supported file systems:
- * FAT12/16/32, exFAT, NTFS, ext2/3/4, XFS, Btrfs, ZFS, squashfs, APFS and HFS+. A single file system is shown at the root,
- * several — as directories named after their partitions; partitions with no supported file system are listed as raw .img files
- * only when no file system was found at all. The image stays open for the index's lifetime.
+ * Raw disk images (.img, .dd) — read only: a bare file system or a disk with an MBR or GPT partition table. Supported file systems:
+ * FAT12/16/32, exFAT, NTFS, ext2/3/4, XFS, Btrfs, ZFS, squashfs, APFS and HFS+. A bare file system is shown at the root; the
+ * partitions of a disk are listed as raw .img files named after their labels (file system label, GPT name) or numbers, which open
+ * as nested archives. The image stays open for the index's lifetime.
  */
 final class DiskImages {
 
@@ -59,11 +60,18 @@ final class DiskImages {
         private final int number;
         private final @NotNull String name;
         private final @NotNull BlockSource source;
+        /** The partition's own name (GPT); "" — none. */
+        private final @NotNull String label;
 
         Volume(final int number, final @NotNull String name, final @NotNull BlockSource source) {
+            this(number, name, source, "");
+        }
+
+        Volume(final int number, final @NotNull String name, final @NotNull BlockSource source, final @NotNull String label) {
             this.number = number;
             this.name = name;
             this.source = source;
+            this.label = label;
         }
     }
 
@@ -74,16 +82,118 @@ final class DiskImages {
         final Path archive = index.getArchive();
         final FileChannel ch = FileChannel.open(archive, StandardOpenOption.READ);
         try {
-            final BlockSource disk = BlockSource.of(ch);
-            final List<Volume> partitions = partitions(disk);
-            if (partitions.isEmpty()) {
-                index.setTar(mount(index, List.of(new Volume(1, "disk", disk)), ch, false));
-            } else {
-                index.setTar(mount(index, partitions, ch, true));
-            }
+            index.setTar(listDisk(index, BlockSource.of(ch), ch));
         } catch (final IOException | RuntimeException e) {
             ch.close();
             throw e instanceof IOException io ? io : new IOException("Damaged disk image: " + archive.getFileName(), e);
+        }
+    }
+
+    /**
+     * A whole disk: its partitions as raw .img files, a bare file system at the root. A disk with neither is an error for a raw
+     * image and a single raw "disk.img" for a virtual disk (which may hold a layout we do not know).
+     */
+    static @NotNull ArchiveReader listDisk(
+        final @NotNull ArchiveIndex index,
+        final @NotNull BlockSource disk,
+        final @NotNull Closeable resource
+    ) throws IOException {
+        final List<Volume> partitions = partitions(disk);
+        if (partitions.isEmpty() && (find(disk) != null || index.getFormat() != ArchiveFormat.VIRTUAL_DISK)) {
+            return mount(index, List.of(new Volume(1, "disk", disk)), resource, false);
+        }
+        final Map<String, BlockSource> raw = new LinkedHashMap<>();
+        if (partitions.isEmpty()) {
+            raw.put("disk.img", disk);
+        }
+        final Set<String> used = new HashSet<>();
+        for (final Volume v : partitions) {
+            if (v.source.size() <= 0) {
+                continue;
+            }
+            final String base = partitionName(v);
+            String name = base + ".img";
+            for (int i = 2; !used.add(name.toLowerCase(Locale.ROOT)); i++) {
+                name = String.format(Locale.ROOT, "%s (%d).img", base, i);
+            }
+            raw.put(name, v.source);
+        }
+        for (final Map.Entry<String, BlockSource> e : raw.entrySet()) {
+            index.add(e.getKey(), false, e.getValue().size(), 0, "");
+        }
+
+        return reader(index.getArchive(), Map.of(), raw, resource);
+    }
+
+    /** File system label, else the partition's GPT name, else "partition" and its number. */
+    private static @NotNull String partitionName(final @NotNull Volume v) {
+        String name;
+        try {
+            name = clean(label(v.source));
+        } catch (final IOException | RuntimeException e) {
+            // an unreadable boot sector: the partition is still listed
+            name = "";
+        }
+        if (name.isEmpty()) {
+            name = clean(v.label);
+        }
+        // Windows drops trailing dots and spaces from file names: the temporary copy would get another name
+        name = name.replaceAll("[. ]+$", "");
+        if (name.isEmpty()) {
+            name = "partition" + v.number;
+        }
+
+        return name;
+    }
+
+    /** The volume label from the superblock, without reading the file system tree; "" — none or not known. */
+    static @NotNull String label(final @NotNull BlockSource dev) throws IOException {
+        if (ExtFs.matches(dev)) {
+            return cString(dev.read(1024 + 120, 16), StandardCharsets.UTF_8);
+        }
+        if (Btrfs.matches(dev)) {
+            return cString(dev.read(65536 + 299, 256), StandardCharsets.UTF_8);
+        }
+        if (Xfs.matches(dev)) {
+            return cString(dev.read(108, 12), StandardCharsets.UTF_8);
+        }
+        if (Ntfs.matches(dev) || ExFat.matches(dev) || !FatFs.matches(dev)) {
+            return "";
+        }
+        final ByteBuffer bpb = le(dev.read(0, 512));
+        final boolean fat32 = (bpb.getShort(22) & 0xFFFF) == 0;
+        if ((bpb.get(fat32 ? 66 : 38) & 0xFF) != 0x29) {
+            return "";
+        }
+        final String label = ascii(bpb, fat32 ? 71 : 43, 11).strip();
+
+        return "NO NAME".equals(label) ? "" : label;
+    }
+
+    private static @NotNull String cString(final byte @NotNull [] b, final @NotNull Charset charset) {
+        int n = 0;
+        while (n < b.length && b[n] != 0) {
+            n++;
+        }
+
+        return new String(b, 0, n, charset).strip();
+    }
+
+    /**
+     * The volume may be opened as an archive: it holds a supported file system, a partition table or an ISO 9660 image.
+     * Checked before a partition is unpacked into a temporary file.
+     */
+    static boolean recognizes(final @NotNull BlockSource dev) {
+        try {
+            if (find(dev) != null || !partitions(dev).isEmpty()) {
+                return true;
+            }
+            final byte[] iso = peek(dev, 0x8001, 5);
+
+            return iso != null && "CD001".equals(new String(iso, StandardCharsets.ISO_8859_1));
+        } catch (final IOException | RuntimeException e) {
+            // unreadable: let the full open report it
+            return true;
         }
     }
 
@@ -219,6 +329,11 @@ final class DiskImages {
             }
 
             @Override
+            public @Nullable BlockSource source(final @NotNull String entry) {
+                return raw.get(entry);
+            }
+
+            @Override
             public void close() throws IOException {
                 resource.close();
             }
@@ -269,7 +384,7 @@ final class DiskImages {
             final byte[] name = new byte[GPT_NAME_LENGTH];
             e.get(GPT_NAME, name);
             final String label = new String(name, StandardCharsets.UTF_16LE).replace("\0", "").strip();
-            result.add(new Volume(i + 1, label, BlockSource.slice(disk, first * sector, (last - first + 1) * sector)));
+            result.add(new Volume(i + 1, label, BlockSource.slice(disk, first * sector, (last - first + 1) * sector), label));
         }
 
         return result;

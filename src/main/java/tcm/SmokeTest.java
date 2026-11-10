@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -1046,7 +1047,8 @@ public final class SmokeTest {
 
     /**
      * Raw disk images: a bare FAT12 (VFAT names) and ext2 (a symbolic link shown as its target, Unix permissions), then both
-     * as partitions of an MBR disk — one directory per file system; recognized by signature under another extension.
+     * as partitions of an MBR disk — raw .img files named after the file system labels (unique ignoring case), which open as nested
+     * archives; recognized by signature under another extension. Then the same disk in every virtual machine format.
      */
     private static void checkDiskImages(final @NotNull Path root) throws Exception {
         final byte[] fat = gunzip(FAT12_IMAGE);
@@ -1061,17 +1063,68 @@ public final class SmokeTest {
         check(Vfs.file(linux + "!/short.txt").getAttrs().equals("rw-rw-r--"), "ext2 permissions");
         final int start = 2048;
         final int fatSectors = fat.length / 512;
-        final byte[] disk = new byte[(start + fatSectors + ext.length / 512) * 512];
+        final int extSectors = ext.length / 512;
+        final int swapSectors = 256;
+        final byte[] disk = new byte[(start + fatSectors + extSectors + swapSectors) * 512];
         final ByteBuffer mbr = ByteBuffer.wrap(disk).order(ByteOrder.LITTLE_ENDIAN);
         mbr.put(446 + 4, (byte) 0x01).putInt(446 + 8, start).putInt(446 + 12, fatSectors);
-        mbr.put(462 + 4, (byte) 0x83).putInt(462 + 8, start + fatSectors).putInt(462 + 12, ext.length / 512);
+        mbr.put(462 + 4, (byte) 0x83).putInt(462 + 8, start + fatSectors).putInt(462 + 12, extSectors);
+        mbr.put(478 + 4, (byte) 0x82).putInt(478 + 8, start + fatSectors + extSectors).putInt(478 + 12, swapSectors);
         mbr.putShort(510, (short) 0xAA55);
         System.arraycopy(fat, 0, disk, start * 512, fat.length);
         System.arraycopy(ext, 0, disk, (start + fatSectors) * 512, ext.length);
+        Arrays.fill(disk, (start + fatSectors + extSectors) * 512 + 4096 - 10, (start + fatSectors + extSectors) * 512 + 4096, (byte) 'S');
         check(ArchiveFormat.detect(Files.write(root.resolve("disk.bin"), disk)) == ArchiveFormat.DISK_IMAGE, "disk image signature");
-        final Path partitioned = Files.write(root.resolve("hdd.raw"), disk);
-        check(names(Vfs.resolve(partitioned.toString())).equals(List.of("1 FAT12 TINY", "2 ext2 tiny")), "mbr partitions as directories");
-        check(read(partitioned + "!/2 ext2 tiny/link").equals(read(partitioned + "!/1 FAT12 TINY/" + longName)), "mbr partition read");
+        final Path partitioned = Files.write(root.resolve("hdd.dd"), disk);
+        checkPartitions(partitioned, fat, ext, longName, "mbr");
+        final Map<String, byte[]> images = new LinkedHashMap<>();
+        images.put("vdi", DiskFixtures.vdi(disk));
+        images.put("vhd", DiskFixtures.vhd(disk));
+        images.put("vhdx", DiskFixtures.vhdx(disk));
+        images.put("vmdk", DiskFixtures.vmdk(disk));
+        images.put("qcow2", DiskFixtures.qcow2(disk));
+        images.put("qed", DiskFixtures.qed(disk));
+        images.put("hdd", DiskFixtures.parallels(disk));
+        for (final Map.Entry<String, byte[]> e : images.entrySet()) {
+            final Path image = Files.write(root.resolve("vm." + e.getKey()), e.getValue());
+            check(e.getValue().length < disk.length || "vhdx".equals(e.getKey()), e.getKey() + " stores only the allocated blocks");
+            check(ArchiveFormat.detect(image) == ArchiveFormat.VIRTUAL_DISK, e.getKey() + " signature");
+            checkPartitions(image, fat, ext, longName, e.getKey());
+        }
+    }
+
+    private static void checkPartitions(
+        final @NotNull Path image,
+        final byte @NotNull [] fat,
+        final byte @NotNull [] ext,
+        final @NotNull String longName,
+        final @NotNull String what
+    ) throws Exception {
+        check(names(Vfs.resolve(image.toString())).equals(List.of("TINY.img", "partition3.img", "tiny (2).img")),
+            what + " partitions as .img files: " + names(Vfs.resolve(image.toString())));
+        check(Arrays.equals(Vfs.readAll(Vfs.file(image + "!/TINY.img")), fat) && Arrays.equals(Vfs.readAll(Vfs.file(image + "!/tiny (2).img")), ext),
+            what + " partition data");
+        check(!Vfs.mayBeNestedArchive(Vfs.file(image + "!/partition3.img")), what + " partition with no file system is not an archive");
+        check(Vfs.openNested(Vfs.file(image + "!/partition3.img")) == null, what + " no file system: not unpacked");
+        final Path tmp = Vfs.openNested(Vfs.file(image + "!/tiny (2).img"));
+        check(tmp != null && Files.size(tmp) == ext.length && Arrays.equals(Files.readAllBytes(tmp), ext), what + " partition unpacked");
+        check(names(Vfs.archiveDir(tmp, "")).equals(List.of("d", "link", "lost+found", "short.txt")), what + " nested partition listing");
+        check(read(tmp + "!/link").equals(read(floppyOf(image, fat) + "!/" + longName)), what + " nested partition read");
+        Vfs.retainNested(tmp);
+        Vfs.releaseNested(tmp);
+        check(!Files.exists(tmp), what + " nested partition deleted");
+        final Path out = Files.createDirectories(image.resolveSibling("parts-" + what));
+        exec(new CopyJob(List.of(Vfs.file(image + "!/TINY.img")), Vfs.resolve(out.toString()), null, "*", false));
+        check(Arrays.equals(Files.readAllBytes(out.resolve("TINY.img")), fat), what + " partition copied out (sparse)");
+    }
+
+    private static @NotNull Path floppyOf(final @NotNull Path image, final byte @NotNull [] fat) throws IOException {
+        final Path floppy = image.resolveSibling("floppy.img");
+        if (!Files.exists(floppy)) {
+            Files.write(floppy, fat);
+        }
+
+        return floppy;
     }
 
     /**

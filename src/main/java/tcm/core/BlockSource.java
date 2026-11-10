@@ -9,9 +9,17 @@ import java.nio.channels.FileChannel;
 import org.jetbrains.annotations.NotNull;
 
 /** A random-access byte range: a disk image partition read by file system parsers. Implementations are thread-safe. */
-interface BlockSource {
+public interface BlockSource {
 
     long size();
+
+    /**
+     * The first position at or after pos that may hold non-zero data: the bytes before it are known to be zeros (unallocated
+     * blocks of a virtual disk) and need not be read; size() — only zeros to the end. The default knows no holes.
+     */
+    default long dataFrom(final long pos) throws IOException {
+        return pos;
+    }
 
     /** Reads exactly len bytes at pos; EOFException if the range goes past the end. */
     void read(long pos, byte @NotNull [] b, int off, int len) throws IOException;
@@ -64,6 +72,11 @@ interface BlockSource {
                     throw new EOFException("read past the end of the partition");
                 }
                 source.read(offset + pos, b, off, len);
+            }
+
+            @Override
+            public long dataFrom(final long pos) throws IOException {
+                return pos >= size ? size : Math.min(size, Math.max(pos, source.dataFrom(offset + pos) - offset));
             }
         };
     }

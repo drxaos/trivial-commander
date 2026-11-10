@@ -22,7 +22,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -46,7 +48,11 @@ import tcm.core.TreeStats;
 import tcm.core.VFile;
 import tcm.core.Vfs;
 import tcm.core.ZipOps;
+import tcm.ops.Job;
+import tcm.ops.JobContext;
+import tcm.ops.JobRunner;
 import tcm.util.Masks;
+import tcm.util.TextUtil;
 
 /**
  * Panel tab: current directory, history, filters, file table, quick search and status line.
@@ -597,7 +603,9 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
                 return;
             }
-            if (f.isInArchive() && openNested(f)) {
+            if (f.isInArchive()) {
+                openNested(f, "No application is associated with " + f.getName());
+
                 return;
             }
         } catch (final IOException e) {
@@ -624,31 +632,90 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         try {
             if (f.isLocal()) {
                 navigate(Vfs.archiveDir(f.getHostPath(), ""), null, true);
-            } else if (!openNested(f)) {
-                showError("Not an archive or unsupported format: " + f.getName(), null);
+            } else {
+                openNested(f, "Not an archive or unsupported format: " + f.getName());
             }
         } catch (final IOException e) {
             showError("Cannot open archive " + Vfs.displayLocation(f), e);
         }
     }
 
-    /** false — the entry is not an archive. */
-    private boolean openNested(final @NotNull VFile f) throws IOException {
-        final Path tmp = Vfs.openNested(f);
-        if (tmp == null) {
-            return false;
-        }
-        boolean opened = false;
-        try {
-            opened = navigate(Vfs.archiveDir(tmp, ""), null, true);
-        } finally {
-            if (!opened) {
-                // nobody holds the copy — it is deleted
-                Vfs.releaseNested(tmp);
-            }
-        }
+    /**
+     * Unpacks an archive lying in an archive into a temporary file in the background (with progress: a partition of a disk image
+     * may take gigabytes) and enters it, unless the tab has moved elsewhere meanwhile; notArchive — the message shown when the entry
+     * turns out not to be an archive.
+     */
+    private void openNested(final @NotNull VFile f, final @NotNull String notArchive) throws IOException {
+        if (!Vfs.mayBeNestedArchive(f)) {
+            showError(notArchive, null);
 
-        return true;
+            return;
+        }
+        if (!confirmTempSpace(f)) {
+            return;
+        }
+        final VFile from = dir;
+        final AtomicReference<Path> result = new AtomicReference<>();
+        final AtomicBoolean finished = new AtomicBoolean();
+        final Job job = new Job("Unpacking " + f.getName()) {
+            @Override
+            public void run(final @NotNull JobContext ctx) throws Exception {
+                ctx.setTotal(f.getSize());
+                final Path tmp = Vfs.openNested(f, ctx);
+                result.set(tmp);
+                if (tmp != null) {
+                    // the file system tree is read here, not on the event thread
+                    Vfs.index(tmp);
+                }
+                finished.set(true);
+            }
+        };
+        JobRunner.run(SwingUtilities.getWindowAncestor(this), job, false, () -> {
+            final Path tmp = result.get();
+            if (tmp == null) {
+                if (finished.get()) {
+                    showError(notArchive, null);
+                }
+
+                return;
+            }
+            boolean opened = false;
+            try {
+                opened = finished.get() && dir.equals(from) && navigate(Vfs.archiveDir(tmp, ""), null, true);
+            } catch (final IOException e) {
+                showError("Cannot open archive " + Vfs.displayLocation(f), e);
+            } finally {
+                if (!opened) {
+                    // nobody holds the copy — it is deleted
+                    Vfs.releaseNested(tmp);
+                }
+            }
+        });
+    }
+
+    /**
+     * The temporary copy would leave less free space than its own size: the user decides. Unpacked partitions are written sparse,
+     * so they usually take much less than their size, but that is not known in advance.
+     */
+    private boolean confirmTempSpace(final @NotNull VFile f) {
+        final long free = Vfs.tempFreeSpace();
+        final long size = f.getSize();
+        if (free < 0 || free - size >= size) {
+            return true;
+        }
+        final String message = size > free
+            ? String.format(
+                "Unpacking %s (%s) into the temporary directory%n%s%nneeds more than the %s free on its disk.%n%nContinue?",
+                f.getName(), TextUtil.shortSize(size), Vfs.tempDir(), TextUtil.shortSize(free)
+            )
+            : String.format(
+                "Unpacking %s (%s) into the temporary directory%n%s%nwill leave %s free on its disk (%s free now).%n%nContinue?",
+                f.getName(), TextUtil.shortSize(size), Vfs.tempDir(), TextUtil.shortSize(free - size), TextUtil.shortSize(free)
+            );
+        final Object[] options = {"Continue", "Cancel"};
+
+        return JOptionPane.showOptionDialog(SwingUtilities.getWindowAncestor(this), message, "Low disk space", JOptionPane.DEFAULT_OPTION,
+            JOptionPane.WARNING_MESSAGE, null, options, options[1]) == 0;
     }
 
     public void selectName(final @NotNull String name) {

@@ -71,7 +71,20 @@ public final class Zstd {
         }
     }
 
+    /** Decompresses the first frame only: the bytes after it (padding to a sector of a qcow2 cluster) are ignored. */
+    public static byte @NotNull [] decompressFrame(final byte @NotNull [] src, final int maxSize) throws IOException {
+        try {
+            return new Zstd(src, maxSize).run(true);
+        } catch (final ArrayIndexOutOfBoundsException | IllegalArgumentException e) {
+            throw new IOException("corrupted zstd data", e);
+        }
+    }
+
     private byte @NotNull [] run() throws IOException {
+        return run(false);
+    }
+
+    private byte @NotNull [] run(final boolean single) throws IOException {
         int pos = 0;
         while (pos + 4 <= src.length) {
             final int magic = le32(pos);
@@ -79,6 +92,9 @@ public final class Zstd {
                 pos += 8 + le32(pos + 4);
             } else if (magic == MAGIC) {
                 pos = frame(pos + 4);
+                if (single) {
+                    break;
+                }
             } else {
                 throw new IOException("not a zstd frame");
             }

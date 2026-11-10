@@ -77,23 +77,32 @@ The Linux archives are skipped on Windows.
   cannot be appended to, so an existing one is replaced after confirmation.
   Names without the UTF-8 flag are read as DOS: CP866 if they are Russian, otherwise CP437.
 - **TAR, TAR.GZ/TGZ, TAR.BZ2, TAR.XZ, RAR (RAR4/RAR5), 7z, ISO, AppImage, squashfs, Chromium/Electron `.pak`, Apple `.dmg`,
-  disk images `.img`, `.deb`, `.rpm`, `.chm`, `.msi`, `.cab` and plain `.gz`, `.bz2`, `.xz`** — read only:
+  disk images `.img`/`.dd`, virtual machine disks `.vdi`, `.vhd`, `.vhdx`, `.vmdk`, `.qcow`, `.qcow2`, `.qed`, `.hdd`, `.deb`, `.rpm`, `.chm`, `.msi`, `.cab` and plain `.gz`, `.bz2`, `.xz`** — read only:
   browsing contents, viewing files, copying from the archive, unpacking, testing. `.pak` resources have only numeric IDs, so they are
   named by ID plus an extension guessed from the content (`1234.png`, `.gz`, `.br`, `.txt`...); aliases are shown as copies. ISO 9660 names come from Rock Ridge (long names, permissions), otherwise
   from Joliet; UDF-only images are not supported. An AppImage is browsed without running it: `Enter` on an executable `.AppImage`
   runs it, `Ctrl+PgDn` opens it as an archive. Symbolic links in ISO/squashfs/DMG are shown as files.
-  A raw disk image (`.img`, `.ima`, `.vfd`, `.raw`, `.hfs`, `.apfs`; by signature under any other name) is either a bare file system
-  or a disk with an MBR (primary and logical partitions) or GPT partition table. File systems: FAT12/16/32 (long names), exFAT,
+  A raw disk image (`.img`, `.dd`, `.ima`, `.vfd`, `.raw`, `.hfs`, `.apfs`; by signature under any other name) is either a bare file
+  system or a disk with an MBR (primary and logical partitions) or GPT partition table. File systems: FAT12/16/32 (long names), exFAT,
   NTFS (sparse and compressed files, hard links; metadata files hidden; EFS-encrypted files fail on read), ext2/ext3/ext4
   (extents, inline data), XFS (v4/v5), Btrfs (one device; subvolumes as directories; zlib, LZO, zstd), ZFS (one disk or one side
-  of a mirror; child datasets as directories; lz4, lzjb, gzip, zle, zstd), squashfs, APFS and HFS+/HFSX. One file system is
-  shown at the root, several — as directories named after the partition (`1 NTFS Data`, `2 ext4 root`); partitions without
-  a supported file system are listed as raw `.img` files only when nothing else was found. An `.img` that is really an ISO, a DMG
-  or a squashfs image opens as such. A symbolic link reads as the file it points to (a link to a directory or outside the file system
+  of a mirror; child datasets as directories; lz4, lzjb, gzip, zle, zstd), squashfs, APFS and HFS+/HFSX. A bare file system is
+  shown at the root; the partitions of a disk are listed as raw `.img` files named after the file system label (FAT, ext, XFS,
+  Btrfs), else the GPT partition name, else the number (`rootfs.img`, `EFI.img`, `partition2.img`; a repeated name gets ` (2)`),
+  and open as nested archives (`Enter`). A partition with no supported file system (swap, UFS...) is reported as not an archive
+  without unpacking it. An `.img` that is really an ISO, a DMG, a qcow2 or a squashfs image opens as such. A symbolic link reads as the file it points to (a link to a directory or outside the file system
   is an empty file). Journals are not replayed: an image of a cleanly unmounted file system reads best.
   A `.dmg` (UDIF; zlib, bzip2, ADC, LZMA chunks — not LZFSE) shows the files of its partitions with the same file systems
   (APFS volumes unencrypted; files compressed by macOS with zlib are unpacked on APFS and HFS+); an image with no supported file
   system lists its partitions as raw `.img` files. A compressed TAR is unpacked into a temporary `.tar` once (as in TC).
+  Virtual machine disks show their partitions as raw `.img` files like a raw disk image (a disk with a bare file system shows it at
+  the root, a disk with neither a partition table nor a file system — one `disk.img`): VirtualBox `.vdi` (dynamic and fixed),
+  Virtual PC / Hyper-V `.vhd` (dynamic and fixed) and `.vhdx`, VMware `.vmdk` (monolithicSparse, streamOptimized, and descriptor
+  files with flat/sparse extents next to them: monolithicFlat, twoGbMaxExtentSparse/Flat), QEMU `.qcow`, `.qcow2` (v2/v3; deflate
+  and zstd compressed clusters) and `.qed`, Parallels `.hdd` (expanding and plain). Snapshots/differencing disks are read through
+  their backing file for qcow, qcow2, qed and VMDK delta disks; differencing VDI, VHD and VHDX disks, encrypted qcow images and
+  qcow2 external data files are not supported. Unallocated blocks of a partition are not written when it is unpacked or copied
+  out: the file is sparse and takes only as much disk space as the data in it.
   A `.deb` is shown as `dpkg-deb -R` unpacks it: the files of `data.tar` at the root, the control files in `DEBIAN`
   (gzip, xz, zstd, bzip2, lzma or none); an `.rpm` shows its cpio payload (gzip, bzip2, xz, lzma, zstd). Symbolic links in them are
   empty files, as in TAR. A `.chm` lists its pages and images (LZX), hiding the internal `::` entries. An `.msi` shows the files it
@@ -114,8 +123,10 @@ The Linux archives are skipped on Windows.
   An encrypted ZIP is read-only.
 - **Archive attributes**: Unix permissions (`rwxr-xr-x`) or DOS flags (`rahs`) stored in ZIP, TAR and RAR are shown in the Attr
   column and set on unpacked files (Unix permissions on Windows and DOS flags on Unix — only "read-only").
-- **Archives inside archives** open with Enter/`Ctrl+PgDn` as well (read only): the nested archive is unpacked into a temporary file,
-  the path is shown as `outer.zip!/dir/inner.tar.gz!/...`, and the temporary file is deleted when the tab leaves the archive or is closed.
+- **Archives inside archives** open with Enter/`Ctrl+PgDn` as well (read only): the nested archive is unpacked into a temporary file
+  in the background (a progress window appears after 300 ms; Cancel stops it), the path is shown as `outer.zip!/dir/inner.tar.gz!/...`,
+  and the temporary file is deleted when the tab leaves the archive or is closed. When the unpacked file would leave less free space
+  in the temporary directory than its own size, a warning asks to Continue or Cancel.
 - **Search** (`Alt+F7`): name mask or RegEx, text (substring/RegEx, case, "NOT containing"), depth, archives,
   size/date/type on the Advanced tab, search in results (`F2`), result history (`Alt+←/→`); "Feed to listbox", "Go to file".
   Flat list of subdirectories — `Ctrl+B`.
