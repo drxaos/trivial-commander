@@ -33,6 +33,8 @@ public enum ArchiveFormat {
     PAK(false, ".pak"),
     /** An Apple disk image (UDIF). */
     DMG(false, ".dmg"),
+    /** A raw disk image: a bare file system or a disk with an MBR/GPT partition table (see DiskImages). */
+    DISK_IMAGE(false, ".img", ".ima", ".vfd", ".raw", ".hfs", ".hfsx", ".apfs"),
     /** A Debian package: an ar archive with control.tar and data.tar. */
     DEB(false, ".deb", ".udeb"),
     /** An RPM package: headers and a compressed cpio payload. */
@@ -155,6 +157,10 @@ public enum ArchiveFormat {
 
         if (DmgArchives.matches(file)) {
             return DMG;
+        }
+
+        if (DiskImages.matches(file)) {
+            return DISK_IMAGE;
         }
 
         return PakArchives.matches(file) ? PAK : null;

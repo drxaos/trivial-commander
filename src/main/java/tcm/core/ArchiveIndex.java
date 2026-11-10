@@ -24,7 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import lombok.Getter;
 
 /**
- * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg,
+ * Archive entry tree (ZIP/JAR, TAR and compressed TAR, RAR, 7z, ISO, squashfs/AppImage, Chromium .pak, Apple .dmg, raw disk images,
  * .deb and .rpm packages, CHM help, MSI packages, cabinets, single .gz/.bz2/.xz files).
  * Directories not explicitly present in the archive are reconstructed from file paths.
  */
@@ -45,7 +45,10 @@ public final class ArchiveIndex {
     private final long archiveSize;
     private final Map<String, VFile> entries = new HashMap<>();
     private final Map<String, List<VFile>> children = new HashMap<>();
-    /** TAR, ISO, DMG, DEB, RPM, CHM, MSI, CAB: kept open for the index's whole lifetime — entries are read by offset without re-parsing headers. */
+    /**
+     * TAR, ISO, DMG, disk images, DEB, RPM, CHM, MSI, CAB: kept open for the index's whole lifetime — entries are read by offset
+     * without re-parsing headers.
+     */
     private @Nullable ArchiveReader tar;
     /** A ZIP with encrypted entries: read via commons-compress and read-only. */
     @Getter
@@ -69,7 +72,7 @@ public final class ArchiveIndex {
     public static @NotNull ArchiveIndex load(final @NotNull Path archive) throws IOException {
         final long modified = Files.getLastModifiedTime(archive).toMillis();
         final long size = Files.size(archive);
-        final ArchiveFormat format = ArchiveFormat.forFile(archive);
+        final ArchiveFormat format = refine(archive, ArchiveFormat.forFile(archive));
         if (format == null) {
             throw new IOException("Not an archive or unsupported format: " + archive.getFileName());
         }
@@ -84,6 +87,7 @@ public final class ArchiveIndex {
             case SQUASHFS -> SquashArchives.load(index);
             case PAK -> PakArchives.load(index);
             case DMG -> DmgArchives.load(index);
+            case DISK_IMAGE -> DiskImages.load(index);
             case DEB -> DebArchives.load(index);
             case RPM -> RpmArchives.load(index);
             case CHM -> ChmArchives.load(index);
@@ -94,6 +98,16 @@ public final class ArchiveIndex {
         }
 
         return index;
+    }
+
+    /** An .img file is often an ISO, a DMG or a squashfs image under another name: the signature decides. */
+    private static @Nullable ArchiveFormat refine(final @NotNull Path archive, final @Nullable ArchiveFormat format) throws IOException {
+        if (format != ArchiveFormat.DISK_IMAGE) {
+            return format;
+        }
+        final ArchiveFormat detected = ArchiveFormat.detect(archive);
+
+        return detected != null ? detected : format;
     }
 
     private static @NotNull ArchiveIndex loadZip(final @NotNull Path archive, final long modified, final long size) throws IOException {

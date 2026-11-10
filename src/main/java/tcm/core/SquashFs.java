@@ -24,11 +24,13 @@ import org.jetbrains.annotations.Nullable;
 import org.tukaani.xz.LZMAInputStream;
 import org.tukaani.xz.XZInputStream;
 
+import tcm.util.Lz4;
+import tcm.util.Lzo;
 import tcm.util.Zstd;
 
 /**
  * A read-only squashfs 4.0 image (the file system of an AppImage) at an offset in a file: directory listings, the whole tree,
- * whole files and file streams by path, symbolic links followed. Compression: gzip, xz, lzma, zstd. Sizes are bounded, so
+ * whole files and file streams by path, symbolic links followed. Compression: gzip, xz, lzma, lzo, lz4, zstd. Sizes are bounded, so
  * a damaged image cannot make it allocate much.
  */
 public final class SquashFs {
@@ -56,7 +58,7 @@ public final class SquashFs {
         void entry(@NotNull String path, boolean directory, long size, long modified, int mode) throws IOException;
     }
 
-    private final FileChannel ch;
+    private final BlockSource ch;
     private final long base;
     private final int blockSize;
     private final int compression;
@@ -68,7 +70,7 @@ public final class SquashFs {
     private int lastFragmentIndex = -1;
     private byte @Nullable [] lastFragment;
 
-    private SquashFs(final @NotNull FileChannel ch, final long base, final @NotNull ByteBuffer sb) {
+    private SquashFs(final @NotNull BlockSource ch, final long base, final @NotNull ByteBuffer sb) {
         this.ch = ch;
         this.base = base;
         this.blockSize = sb.getInt(12);
@@ -81,6 +83,11 @@ public final class SquashFs {
 
     /** The image at the offset, or null if there is no squashfs 4.0 superblock there. The channel stays owned by the caller. */
     public static @Nullable SquashFs open(final @NotNull FileChannel ch, final long offset) throws IOException {
+        return open(BlockSource.of(ch), offset);
+    }
+
+    /** The same over a partition of a disk image. */
+    static @Nullable SquashFs open(final @NotNull BlockSource ch, final long offset) throws IOException {
         if (offset < 0 || offset + 96 > ch.size()) {
             return null;
         }
@@ -101,7 +108,7 @@ public final class SquashFs {
         if (ch.size() < 64) {
             return -1;
         }
-        final ByteBuffer h = read(ch, 0, 64);
+        final ByteBuffer h = read(BlockSource.of(ch), 0, 64);
         if (h.getInt(0) == MAGIC) {
             return 0;
         }
@@ -385,7 +392,9 @@ public final class SquashFs {
         return switch (compression) {
             case 1 -> inflate(data, max);
             case 2 -> readAll(new LZMAInputStream(new ByteArrayInputStream(data)), max);
+            case 3 -> Lzo.decompress(data, max);
             case 4 -> readAll(new XZInputStream(new ByteArrayInputStream(data)), max);
+            case 5 -> Lz4.decompress(data, max);
             case 6 -> Zstd.decompress(data, max);
             default -> throw new IOException("unsupported squashfs compression " + compression);
         };
@@ -424,18 +433,12 @@ public final class SquashFs {
         }
     }
 
-    private static @NotNull ByteBuffer read(final @NotNull FileChannel ch, final long pos, final int length) throws IOException {
+    private static @NotNull ByteBuffer read(final @NotNull BlockSource ch, final long pos, final int length) throws IOException {
         if (length < 0 || length > 2 * MAX_BLOCK || pos < 0 || pos + length > ch.size()) {
             throw new EOFException("outside the squashfs image");
         }
-        final ByteBuffer buf = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
-        while (buf.hasRemaining()) {
-            if (ch.read(buf, pos + buf.position()) < 0) {
-                throw new EOFException();
-            }
-        }
 
-        return buf.flip();
+        return ByteBuffer.wrap(ch.read(pos, length)).order(ByteOrder.LITTLE_ENDIAN);
     }
 
     private static byte @NotNull [] bytes(final @NotNull ByteBuffer buf) {

@@ -218,6 +218,24 @@ public final class SmokeTest {
         + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
+    /** mkfs.fat -F 12 -n TINY, 64 KiB, gzip: d/Длинное имя файла.txt (VFAT name) and short.txt. */
+    private static final String FAT12_IMAGE = "H4sIAAAAAAACA+3cP2sUQRgH4EkcMETypxDRysHOZkkCQsQYUIJoY0RPUTTqxuzpJfEu3K6QgEg+gp9DLMVGEL9AWmsLuzSWqdRNDiUHCoJYSJ5nl51hf8wW"
+        + "M7BTzbs98/LpSrPMmnkVBuNAGAyDm2FnIIzXvR82w+m39z59bFy5eif1XLrQmJyq29GT7+8+f33qQ3Xk1pvRd4fD1vj97S9Tn7eObZ3Y/tp40ipTfbc7VcrT"
+        + "YqdT5YurRVpqlStZStdWi7wsUqtdFt2+vLnaWVvbSHl7aWR4rVuUZd3dSCvFRqo6qerWyeO81U5ZlqWR4cDfuPlq59ueMXNxMFn/g23fT30ohMmHywvLC722"
+        + "l8+ln8aH+vLe/nDj8vz1Rh02bjfS8b48hmh6AQAAAAAAAAAAAAAAAAAA4I9k+873h1+c78+y3+W98Rcn4tl4Lk7ELIyFiSqsh6p+u1tSovccOFqn0/F8fdX5"
+        + "bDwTU5iOM3E+hpDCXHyw58Xkbv2A/u8fCiOWBwD+iWZrvXrWLVJVrFeqqQHAwZAvPrLtAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        + "AAAA/5XvDB1KZAAAAQA=";
+
+    /** mke2fs -t ext2 -b 1024 -L tiny -d, 100 KiB, gzip: the same files and "link" — a symbolic link to the long-named one. */
+    private static final String EXT2_IMAGE = "H4sIAAAAAAACA+3bv2sTYRgH8MslIv2lVavWLUPpIkSd7NpNxc0/QNS0WC0ptKlUHLTQXUGhs6uDdFBQrCJIRzH9A9zjIII4dNH4JpeG/hKkWNv0Pp/wpHnJ"
+        + "Ffpe+n3uvRwXRUBa9YYqhjoQ6lKoTLNa8kn1Noelz99vRVGtduVbprFdMk6s/l5XczAUfsShsqGeXf50/t7Qxa7nj/rj3LkPc+Wx0t3/PdeVwY9Lj+cvXJ0f"
+        + "+PLrzlJ3qf73dq+b17+VD49MSv6POkSpLdWzmWvlP9MYA+lQq9Vah6iVGpAq9+0CSKtozfnvaqVp/fN1ODkB2jz/XOO7i50+v81vGKdt/wO758FseDqby23u"
+        + "f5l1/W87Tuh/sKe9r69/zm61/omj/jXbdUbJdZ369ZKeUIdCHY6S60JHQh0NdSxUX6jjbbT++TlczW61/qtm43X97+Q+Xf+9mK1me6Kt5r++//fv0/nXnlaz"
+        + "g3+Y/1rFM5UnlTeVV5W34fGu8jIfXi4uP8wvz1UWKq/DOwuF8ky5PT//3F98/qec/+xLcaOnZ+JC63UcFwpJr++LOuPxiany6dGJ6VIx6f31bYvN/t8d5Q6O"
+        + "j5Vu148Di9mOzNTNicny9mIA7IKuDfn/kU3yD6REzi4A+QfkH5B/QP4B+QfkH5B/QP4B+QfkHwDYy1bv6dt4/1/9nuBqdiCzM3e9AnvB6NhMeXpyJF8emSl3"
+        + "2h2QKteu3xB7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA28hvcmUNC"
+        + "AJABAA==";
+
     private static final String FIXTURE = "fixture content\n".repeat(150);
     private static final String LONG_NAME = "a very long file name that does not fit into the 8.3 format.txt";
 
@@ -332,6 +350,7 @@ public final class SmokeTest {
         checkMoreArchives(root, src);
         checkPakArchive(root);
         checkDmgImage(root);
+        checkDiskImages(root);
         checkPackages(root);
         checkCabinet(root);
         checkIconImages();
@@ -1023,6 +1042,36 @@ public final class SmokeTest {
             check(Arrays.equals(in.readAllBytes(), disk), "dmg partition data (zlib, zero, raw, adc)");
         }
         check(ArchiveFormat.detect(Files.write(root.resolve("disk.img"), file.toByteArray())) == ArchiveFormat.DMG, "dmg signature");
+    }
+
+    /**
+     * Raw disk images: a bare FAT12 (VFAT names) and ext2 (a symbolic link shown as its target, Unix permissions), then both
+     * as partitions of an MBR disk — one directory per file system; recognized by signature under another extension.
+     */
+    private static void checkDiskImages(final @NotNull Path root) throws Exception {
+        final byte[] fat = gunzip(FAT12_IMAGE);
+        final byte[] ext = gunzip(EXT2_IMAGE);
+        final String longName = "d/Длинное имя файла.txt";
+        final Path floppy = Files.write(root.resolve("floppy.img"), fat);
+        check(names(Vfs.resolve(floppy.toString())).equals(List.of("d", "short.txt")), "fat12 image names");
+        check(read(floppy + "!/" + longName).equals("fixture text\n") && read(floppy + "!/short.txt").equals("abc\n"), "fat12 image read");
+        final Path linux = Files.write(root.resolve("linux.img"), ext);
+        check(names(Vfs.resolve(linux.toString())).equals(List.of("d", "link", "lost+found", "short.txt")), "ext2 image names");
+        check(read(linux + "!/link").equals("fixture text\n"), "ext2 symbolic link read as its target");
+        check(Vfs.file(linux + "!/short.txt").getAttrs().equals("rw-rw-r--"), "ext2 permissions");
+        final int start = 2048;
+        final int fatSectors = fat.length / 512;
+        final byte[] disk = new byte[(start + fatSectors + ext.length / 512) * 512];
+        final ByteBuffer mbr = ByteBuffer.wrap(disk).order(ByteOrder.LITTLE_ENDIAN);
+        mbr.put(446 + 4, (byte) 0x01).putInt(446 + 8, start).putInt(446 + 12, fatSectors);
+        mbr.put(462 + 4, (byte) 0x83).putInt(462 + 8, start + fatSectors).putInt(462 + 12, ext.length / 512);
+        mbr.putShort(510, (short) 0xAA55);
+        System.arraycopy(fat, 0, disk, start * 512, fat.length);
+        System.arraycopy(ext, 0, disk, (start + fatSectors) * 512, ext.length);
+        check(ArchiveFormat.detect(Files.write(root.resolve("disk.bin"), disk)) == ArchiveFormat.DISK_IMAGE, "disk image signature");
+        final Path partitioned = Files.write(root.resolve("hdd.raw"), disk);
+        check(names(Vfs.resolve(partitioned.toString())).equals(List.of("1 FAT12 TINY", "2 ext2 tiny")), "mbr partitions as directories");
+        check(read(partitioned + "!/2 ext2 tiny/link").equals(read(partitioned + "!/1 FAT12 TINY/" + longName)), "mbr partition read");
     }
 
     /**

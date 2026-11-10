@@ -57,7 +57,7 @@ The Linux archives are skipped on Windows.
   (shared-mime-info, PNG and SVG icons; another theme — `-Dtcm.iconTheme=breeze`), on Windows from the shell,
   on macOS from Launch Services (`java -jar` only: the jar manifest exports `sun.lwawt.macosx`). On Linux and macOS
   the icons of `.exe`/`.dll`, `.ico`/`.cur`/`.icns` and `.AppImage` files are read from the files (an AppImage is not run: its icon
-  is taken from the squashfs image inside — gzip, xz or zstd). Directories and files without a system icon keep the built-in icons.
+  is taken from the squashfs image inside — gzip, xz, lzma, lzo, lz4 or zstd). Directories and files without a system icon keep the built-in icons.
 - **Tabs** (`Ctrl+T`/`Ctrl+Shift+T` — new/background, `Ctrl+W`/`Ctrl+Shift+W` — close/others, `Ctrl+Tab`, list `Ctrl+Shift+A`),
   double click on empty space right of the tabs duplicates the current one, middle button (wheel) on a tab closes it; tabs in one row (at most 200 px wide,
   full path in the tooltip), the strip scrolls with the mouse wheel,
@@ -77,14 +77,23 @@ The Linux archives are skipped on Windows.
   cannot be appended to, so an existing one is replaced after confirmation.
   Names without the UTF-8 flag are read as DOS: CP866 if they are Russian, otherwise CP437.
 - **TAR, TAR.GZ/TGZ, TAR.BZ2, TAR.XZ, RAR (RAR4/RAR5), 7z, ISO, AppImage, squashfs, Chromium/Electron `.pak`, Apple `.dmg`,
-  `.deb`, `.rpm`, `.chm`, `.msi`, `.cab` and plain `.gz`, `.bz2`, `.xz`** — read only:
+  disk images `.img`, `.deb`, `.rpm`, `.chm`, `.msi`, `.cab` and plain `.gz`, `.bz2`, `.xz`** — read only:
   browsing contents, viewing files, copying from the archive, unpacking, testing. `.pak` resources have only numeric IDs, so they are
   named by ID plus an extension guessed from the content (`1234.png`, `.gz`, `.br`, `.txt`...); aliases are shown as copies. ISO 9660 names come from Rock Ridge (long names, permissions), otherwise
   from Joliet; UDF-only images are not supported. An AppImage is browsed without running it: `Enter` on an executable `.AppImage`
   runs it, `Ctrl+PgDn` opens it as an archive. Symbolic links in ISO/squashfs/DMG are shown as files.
-  A `.dmg` (UDIF; zlib, bzip2, ADC, LZMA chunks — not LZFSE) shows the files of its APFS volumes (unencrypted; files compressed by
-  macOS with zlib are unpacked); an image with HFS+ or another file system lists its partitions as raw `.img` files. A compressed TAR is unpacked into a temporary `.tar` once
-  (as in TC).
+  A raw disk image (`.img`, `.ima`, `.vfd`, `.raw`, `.hfs`, `.apfs`; by signature under any other name) is either a bare file system
+  or a disk with an MBR (primary and logical partitions) or GPT partition table. File systems: FAT12/16/32 (long names), exFAT,
+  NTFS (sparse and compressed files, hard links; metadata files hidden; EFS-encrypted files fail on read), ext2/ext3/ext4
+  (extents, inline data), XFS (v4/v5), Btrfs (one device; subvolumes as directories; zlib, LZO, zstd), ZFS (one disk or one side
+  of a mirror; child datasets as directories; lz4, lzjb, gzip, zle, zstd), squashfs, APFS and HFS+/HFSX. One file system is
+  shown at the root, several — as directories named after the partition (`1 NTFS Data`, `2 ext4 root`); partitions without
+  a supported file system are listed as raw `.img` files only when nothing else was found. An `.img` that is really an ISO, a DMG
+  or a squashfs image opens as such. A symbolic link reads as the file it points to (a link to a directory or outside the file system
+  is an empty file). Journals are not replayed: an image of a cleanly unmounted file system reads best.
+  A `.dmg` (UDIF; zlib, bzip2, ADC, LZMA chunks — not LZFSE) shows the files of its partitions with the same file systems
+  (APFS volumes unencrypted; files compressed by macOS with zlib are unpacked on APFS and HFS+); an image with no supported file
+  system lists its partitions as raw `.img` files. A compressed TAR is unpacked into a temporary `.tar` once (as in TC).
   A `.deb` is shown as `dpkg-deb -R` unpacks it: the files of `data.tar` at the root, the control files in `DEBIAN`
   (gzip, xz, zstd, bzip2, lzma or none); an `.rpm` shows its cpio payload (gzip, bzip2, xz, lzma, zstd). Symbolic links in them are
   empty files, as in TAR. A `.chm` lists its pages and images (LZX), hiding the internal `::` entries. An `.msi` shows the files it

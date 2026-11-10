@@ -1,6 +1,5 @@
 package tcm.core;
 
-import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,8 +13,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.zip.DataFormatException;
-import java.util.zip.Inflater;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -23,7 +20,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Read-only APFS container (as found in a .dmg): the latest checkpoint superblock, the object maps, and each unencrypted
  * volume's file system tree, read in full at open. File data comes from extents; files compressed by the system (decmpfs)
- * are supported with zlib, the most common method; LZVN/LZFSE ones fail on read. Encrypted volumes are refused.
+ * are supported with zlib (see Decmpfs). Encrypted volumes are refused.
  * A symbolic link is shown as the file it points to inside the volume (reading it reads that file), any other link —
  * as an empty file. With several volumes each one becomes a top-level directory named after the volume.
  */
@@ -60,15 +57,9 @@ final class Apfs {
     private static final long FS_UNENCRYPTED = 1;
     private static final int XATTR_STREAM = 1;
     private static final int XATTR_EMBEDDED = 2;
-    private static final String DECMPFS = "com.apple.decmpfs";
+    private static final String DECMPFS = Decmpfs.XATTR;
     private static final String RESOURCE_FORK = "com.apple.ResourceFork";
     private static final String SYMLINK = "com.apple.fs.symlink";
-    private static final int DECMPFS_MAGIC = 0x636D7066;
-    private static final int DECMPFS_HEADER = 16;
-    private static final int CMP_UNCOMPRESSED_XATTR = 1;
-    private static final int CMP_ZLIB_XATTR = 3;
-    private static final int CMP_ZLIB_RSRC = 4;
-    private static final int CMP_BLOCK = 64 * 1024;
     private static final int MAX_XATTR = 64 * 1024 * 1024;
     private static final long NANOS_PER_MILLI = 1_000_000;
 
@@ -554,77 +545,30 @@ final class Apfs {
                 return n.size;
             }
             final byte[] h = xattr(n.id, DECMPFS);
-            if (h == null || h.length < DECMPFS_HEADER || le(h).getInt(0) != DECMPFS_MAGIC) {
-                return n.size;
-            }
 
-            return le(h).getLong(8);
+            return Decmpfs.matches(h) ? Decmpfs.size(h) : n.size;
         }
 
         private @NotNull InputStream data(final @NotNull Inode n) throws IOException {
-            if ((n.bsdFlags & UF_COMPRESSED) == 0) {
+            final byte[] h = (n.bsdFlags & UF_COMPRESSED) == 0 ? null : xattr(n.id, DECMPFS);
+            if (!Decmpfs.matches(h)) {
                 return new Extents(extents.getOrDefault(n.privateId, List.of()), n.size).stream();
             }
             final long id = n.id;
-            final byte[] h = xattr(id, DECMPFS);
-            if (h == null || h.length < DECMPFS_HEADER || le(h).getInt(0) != DECMPFS_MAGIC) {
-                return new Extents(extents.getOrDefault(n.privateId, List.of()), n.size).stream();
-            }
-            final int method = le(h).getInt(4);
-            final long size = le(h).getLong(8);
-            switch (method) {
-                case CMP_UNCOMPRESSED_XATTR -> {
-                    return new ByteArrayInputStream(h, DECMPFS_HEADER, h.length - DECMPFS_HEADER);
-                }
-                case CMP_ZLIB_XATTR -> {
-                    if (size > MAX_XATTR) {
-                        throw new IOException("APFS: damaged compressed file");
-                    }
 
-                    return new ByteArrayInputStream(block(Arrays.copyOfRange(h, DECMPFS_HEADER, h.length), (int) size));
+            return Decmpfs.open(h, () -> {
+                final Xattr fork = xattrs.getOrDefault(id, Map.of()).get(RESOURCE_FORK);
+                if (fork == null) {
+                    return null;
                 }
-                case CMP_ZLIB_RSRC -> {
-                    final Xattr fork = xattrs.getOrDefault(id, Map.of()).get(RESOURCE_FORK);
-                    if (fork == null) {
-                        throw new IOException("APFS: compressed file without its resource fork");
-                    }
-                    final Extents stored = fork.data != null ? null : new Extents(extents.getOrDefault(fork.stream, List.of()), fork.size);
 
-                    return new ForkStream(fork.data, stored, size);
-                }
-                default -> throw new IOException("APFS: file compression method " + method + " (LZVN/LZFSE) is not supported");
-            }
-        }
-    }
-
-    /** A zlib block of a compressed file; a first byte with the low nibble 0xF marks data stored as is. */
-    private static byte @NotNull [] block(final byte @NotNull [] packed, final int size) throws IOException {
-        if (packed.length > 0 && (packed[0] & 0x0F) == 0x0F) {
-            return Arrays.copyOfRange(packed, 1, Math.min(packed.length, size + 1));
-        }
-        final Inflater inflater = new Inflater();
-        try {
-            inflater.setInput(packed);
-            final byte[] out = new byte[size];
-            int n = 0;
-            while (n < size && !inflater.finished()) {
-                final int got = inflater.inflate(out, n, size - n);
-                if (got == 0 && (inflater.needsInput() || inflater.needsDictionary())) {
-                    break;
-                }
-                n += got;
-            }
-
-            return n == size ? out : Arrays.copyOf(out, n);
-        } catch (final DataFormatException e) {
-            throw new IOException("APFS: damaged compressed file", e);
-        } finally {
-            inflater.end();
+                return fork.data != null ? Decmpfs.bytes(fork.data) : new Extents(extents.getOrDefault(fork.stream, List.of()), fork.size);
+            });
         }
     }
 
     /** File data by extents {logical offset, length, physical block (0 — sparse)}; past the extents the file reads as zeros. */
-    private final class Extents {
+    private final class Extents implements BlockSource {
 
         private final long @NotNull [] @NotNull [] list;
         private final long size;
@@ -635,7 +579,13 @@ final class Apfs {
             this.size = size;
         }
 
-        void read(final long pos, final byte @NotNull [] b, final int off, final int len) throws IOException {
+        @Override
+        public long size() {
+            return size;
+        }
+
+        @Override
+        public void read(final long pos, final byte @NotNull [] b, final int off, final int len) throws IOException {
             if (pos < 0 || pos + len > size) {
                 throw new EOFException("APFS: read past the end of a file");
             }
@@ -731,101 +681,6 @@ final class Apfs {
                     return step;
                 }
             };
-        }
-    }
-
-    /**
-     * A file compressed into its resource fork: after the 256-byte fork header, at the data offset, a big-endian length,
-     * then a little-endian block count and {offset, size} table (offsets from the table start), each block 64 KiB unpacked.
-     */
-    private static final class ForkStream extends InputStream {
-
-        private final byte @Nullable [] fork;
-        private final @Nullable Extents extents;
-        private final long size;
-        private long @Nullable [] table;
-        private long tableBase;
-        private byte @NotNull [] current = new byte[0];
-        private int currentPos;
-        private int nextBlock;
-        private long produced;
-
-        private ForkStream(final byte @Nullable [] fork, final @Nullable Extents extents, final long size) {
-            this.fork = fork;
-            this.extents = extents;
-            this.size = size;
-        }
-
-        private byte @NotNull [] readFork(final long pos, final int len) throws IOException {
-            final byte[] b = new byte[len];
-            if (fork != null) {
-                if (pos < 0 || pos + len > fork.length) {
-                    throw new EOFException("APFS: damaged resource fork");
-                }
-                System.arraycopy(fork, (int) pos, b, 0, len);
-            } else if (extents != null) {
-                extents.read(pos, b, 0, len);
-            }
-
-            return b;
-        }
-
-        private void readTable() throws IOException {
-            final ByteBuffer header = ByteBuffer.wrap(readFork(0, 16));
-            final long dataOffset = Integer.toUnsignedLong(header.getInt(0));
-            tableBase = dataOffset + 4;
-            final int count = le(readFork(tableBase, 4)).getInt(0);
-            if (count < 0 || count > MAX_XATTR / 8) {
-                throw new IOException("APFS: damaged resource fork");
-            }
-            final ByteBuffer t = le(readFork(tableBase + 4, count * 8));
-            table = new long[count * 2];
-            for (int i = 0; i < count; i++) {
-                table[i * 2] = Integer.toUnsignedLong(t.getInt(i * 8));
-                table[i * 2 + 1] = Integer.toUnsignedLong(t.getInt(i * 8 + 4));
-            }
-        }
-
-        @Override
-        public int read() throws IOException {
-            final byte[] one = new byte[1];
-
-            return read(one, 0, 1) < 0 ? -1 : one[0] & 0xFF;
-        }
-
-        @Override
-        public int read(final byte @NotNull [] b, final int off, final int len) throws IOException {
-            if (len == 0) {
-                return 0;
-            }
-            if (currentPos >= current.length) {
-                if (produced >= size) {
-                    return -1;
-                }
-                if (table == null) {
-                    readTable();
-                }
-                if (nextBlock * 2 >= table.length) {
-                    throw new EOFException("APFS: truncated compressed file");
-                }
-                final long blockSize = table[nextBlock * 2 + 1];
-                if (blockSize > CMP_BLOCK * 2L) {
-                    throw new IOException("APFS: damaged compressed file");
-                }
-                final int unpacked = (int) Math.min(CMP_BLOCK, size - produced);
-                current = block(readFork(tableBase + table[nextBlock * 2], (int) blockSize), unpacked);
-                currentPos = 0;
-                nextBlock++;
-                produced += current.length;
-                if (current.length == 0) {
-                    throw new EOFException("APFS: truncated compressed file");
-                }
-            }
-            final int n = Math.min(len, current.length - currentPos);
-            System.arraycopy(current, currentPos, b, off, n);
-            currentPos += n;
-
-            return n;
         }
     }
 

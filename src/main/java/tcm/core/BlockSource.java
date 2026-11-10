@@ -48,6 +48,26 @@ interface BlockSource {
         };
     }
 
+    /** The range [offset, offset + length) of the source (cut to its end) as a source of its own: a partition of a disk. */
+    static @NotNull BlockSource slice(final @NotNull BlockSource source, final long offset, final long length) {
+        final long size = Math.max(0, Math.min(length, source.size() - offset));
+
+        return new BlockSource() {
+            @Override
+            public long size() {
+                return size;
+            }
+
+            @Override
+            public void read(final long pos, final byte @NotNull [] b, final int off, final int len) throws IOException {
+                if (pos < 0 || pos + len > size) {
+                    throw new EOFException("read past the end of the partition");
+                }
+                source.read(offset + pos, b, off, len);
+            }
+        };
+    }
+
     /** A sequential stream over the range [offset, offset + length) of the source. */
     static @NotNull InputStream stream(final @NotNull BlockSource source, final long offset, final long length) {
         return new InputStream() {
