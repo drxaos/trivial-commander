@@ -30,6 +30,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import tcm.util.Keys;
+import tcm.util.Placement;
 
 /**
  * Directory tree (Alt+F10, F10 in dialogs): subdirectories are loaded on expansion; Enter — choose the directory.
@@ -80,7 +81,7 @@ public final class TreeDialog extends JDialog {
         getContentPane().add(buttons, BorderLayout.SOUTH);
         rescan(start);
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
     }
 
     /** Selected path or null. */

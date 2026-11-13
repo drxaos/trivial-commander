@@ -51,7 +51,9 @@ import tcm.core.ZipOps;
 import tcm.ops.Job;
 import tcm.ops.JobContext;
 import tcm.ops.JobRunner;
+import tcm.util.Keys;
 import tcm.util.Masks;
+import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
@@ -115,6 +117,8 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     private @NotNull String quickFilter = "";
     private @NotNull String lastQuickFilter = "";
     private boolean active;
+    /** Whether the listing was read with hidden files: a tab in the background misses the switch (Ctrl+H). */
+    private boolean listedHidden;
 
     public PanelTab(final @NotNull FilePanel owner, final @NotNull VFile dir) {
         super(new BorderLayout());
@@ -171,6 +175,7 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         if (parent != null) {
             visible.add(VFile.parentLink(parent));
         }
+        listedHidden = owner.getHost().isShowHidden();
         for (final VFile f : files) {
             if (isVisible(f)) {
                 visible.add(f);
@@ -919,6 +924,21 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         updateHeaderColors();
     }
 
+    /**
+     * The tab came to the front: the view settings of the window (brief, thumbnails, hidden files) may have changed while it was
+     * in the background, and only what differs is applied. Search results are a list of their own and stay as they are.
+     */
+    public void syncView() {
+        final PanelHost host = owner.getHost();
+        if (table.isThumbs() != host.isThumbs()) {
+            setThumbs(host.isThumbs());
+        }
+        setBrief(host.isBrief());
+        if (feed == null && listedHidden != host.isShowHidden()) {
+            refreshQuietly();
+        }
+    }
+
     public void setThumbs(final boolean value) {
         table.setThumbs(value);
     }
@@ -1114,8 +1134,8 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
     /** Ctrl+F12: user filter. */
     public void askFilter() {
-        final String mask = (String) JOptionPane.showInputDialog(this, "Show only files matching mask (e.g. *.txt;*.md, exclude: *|*.bak):",
-            "Filter", JOptionPane.PLAIN_MESSAGE, null, null, filter);
+        final String mask = (String) JOptionPane.showInputDialog(Placement.windowOf(this),
+            "Show only files matching mask (e.g. *.txt;*.md, exclude: *|*.bak):", "Filter", JOptionPane.PLAIN_MESSAGE, null, null, filter);
         if (mask != null) {
             setFilter(mask);
         }
@@ -1124,8 +1144,8 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
     /** Shift+F6 on "..": edit the path in the header. */
     public void editPath() {
-        final String path = (String) JOptionPane.showInputDialog(this, "Go to:", "Path", JOptionPane.PLAIN_MESSAGE, null, null,
-            dir.getLocation());
+        final String path = (String) JOptionPane.showInputDialog(Placement.windowOf(this), "Go to:", "Path", JOptionPane.PLAIN_MESSAGE, null,
+            null, dir.getLocation());
         if (path != null && !path.isBlank()) {
             navigate(path.trim().replaceFirst("^~", System.getProperty("user.home")));
         }
@@ -1199,8 +1219,8 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
     private void askMarkGroup(final boolean mark, final boolean filesOnly) {
         final String title = (mark ? "Select" : "Unselect") + (filesOnly ? " files" : " group");
-        final String mask = (String) JOptionPane.showInputDialog(this, "Mask (e.g. *.txt;*.md):", title, JOptionPane.PLAIN_MESSAGE, null, null,
-            "*.*");
+        final String mask = (String) JOptionPane.showInputDialog(Placement.windowOf(this), "Mask (e.g. *.txt;*.md):", title,
+            JOptionPane.PLAIN_MESSAGE, null, null, "*.*");
         if (mask != null && !mask.isBlank()) {
             markByMask(mask, mark, filesOnly);
         }
@@ -1213,6 +1233,10 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             throw new IllegalArgumentException("Bad key: " + key);
         }
         table.getInputMap(JComponent.WHEN_FOCUSED).put(ks, key);
+        final KeyStroke twin = Keys.macTwin(ks);
+        if (twin != null) {
+            table.getInputMap(JComponent.WHEN_FOCUSED).put(twin, key);
+        }
         table.getActionMap().put(key, new AbstractAction() {
             @Override
             public void actionPerformed(final ActionEvent e) {

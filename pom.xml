@@ -33,6 +33,7 @@
         <!-- the native distributions are per OS: the profile "windows" below swaps the defaults -->
         <dist.linux.skip>false</dist.linux.skip>
         <dist.windows.skip>true</dist.windows.skip>
+        <dist.macos.skip>true</dist.macos.skip>
     </properties>
 
     <dependencies>
@@ -216,6 +217,53 @@
                 </pluginManagement>
             </build>
         </profile>
+        <profile>
+            <id>macos</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <properties>
+                <dist.linux.skip>true</dist.linux.skip>
+                <dist.macos.skip>false</dist.macos.skip>
+            </properties>
+        </profile>
+        <!--
+            macOS: target/tcm-VERSION-macos-ARCH-jvm.dmg with "Trivial Commander.app" - the jar and a jlink runtime of the JDK
+            the build runs on (mvn -Pdmg package). With -Pnative the app holds the native executable instead (see the profile "native").
+        -->
+        <profile>
+            <id>dmg</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>${exec-maven-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>dmg-macos-jvm</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/src/macos/build.sh</argument>
+                                        <argument>${project.build.directory}</argument>
+                                        <argument>${project.build.finalName}</argument>
+                                        <argument>${project.version}</argument>
+                                        <argument>jvm</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <!-- graalvm-25; on Windows run from a shell with the MSVC environment (vcvars64.bat / x64 Native Tools Command Prompt) -->
         <profile>
             <id>native</id>
@@ -326,6 +374,25 @@
                                         <argument>${project.basedir}/src/appimage/build.sh</argument>
                                         <argument>${project.build.directory}</argument>
                                         <argument>${project.build.finalName}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <!-- macOS: the native executable as an app in target/tcm-VERSION-macos-ARCH.dmg -->
+                            <execution>
+                                <id>dmg-macos-native</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${dist.macos.skip}</skip>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/src/macos/build.sh</argument>
+                                        <argument>${project.build.directory}</argument>
+                                        <argument>${project.build.finalName}</argument>
+                                        <argument>${project.version}</argument>
+                                        <argument>native</argument>
                                     </arguments>
                                 </configuration>
                             </execution>

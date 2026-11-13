@@ -39,6 +39,7 @@ import tcm.core.VFile;
 import tcm.core.Vfs;
 import tcm.util.Diff;
 import tcm.util.Keys;
+import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
@@ -73,7 +74,7 @@ public final class CompareWindow {
     private CompareWindow(final @Nullable Window owner, final @Nullable VFile a, final @Nullable VFile b) {
         window = AppWindows.create(owner, "Compare contents");
         window.setSize(1100, 720);
-        window.setLocationRelativeTo(owner);
+        Placement.center(window, owner);
         final JPanel content = new JPanel(new BorderLayout());
         content.add(createTop(), BorderLayout.NORTH);
         // shared scroll model: the lines are aligned, so the panes scroll synchronously

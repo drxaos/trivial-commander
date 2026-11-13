@@ -69,6 +69,7 @@ import tcm.ui.IconImages;
 import tcm.ui.RasterImages;
 import tcm.ui.SvgImages;
 import tcm.util.Keys;
+import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
@@ -122,6 +123,7 @@ public final class ViewerPanel extends JPanel {
     private float fontSize;
     private int loadGeneration;
     private @Nullable SwingWorker<?, ?> worker;
+    @Getter
     private boolean showingImage;
     private boolean showingMarkdown;
     private boolean variableWidth;
@@ -215,10 +217,6 @@ public final class ViewerPanel extends JPanel {
 
     public @NotNull JComponent getFocusTarget() {
         return showingImage ? imageView.getFocusTarget() : shownText();
-    }
-
-    public boolean isShowingImage() {
-        return showingImage;
     }
 
     public void setImageNavigator(final @Nullable IntConsumer navigator) {
@@ -323,22 +321,21 @@ public final class ViewerPanel extends JPanel {
         if (showingMarkdown) {
             return 8;
         }
-        switch (shownMode) {
-            case BINARY:
-                return 2;
-            case HEX:
-                return 3;
-            case HTML:
-                return 5;
-            case JSON:
-                return 9;
-            default:
+        return switch (shownMode) {
+            case BINARY -> 2;
+            case HEX -> 3;
+            case HTML -> 5;
+            case JSON -> 9;
+            default -> {
                 if (StandardCharsets.UTF_16LE.equals(charset)) {
-                    return 6;
+                    yield 6;
                 }
 
-                return StandardCharsets.UTF_8.equals(charset) ? 7 : 1;
-        }
+                yield StandardCharsets.UTF_8.equals(charset)
+                        ? 7
+                        : 1;
+            }
+        };
     }
 
     private static @NotNull JCheckBoxMenuItem numbered(final int n, final @NotNull String text, final @NotNull Runnable action) {
@@ -396,7 +393,8 @@ public final class ViewerPanel extends JPanel {
         try (InputStream in = Vfs.openInput(f)) {
             Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
         } catch (final IOException e) {
-            JOptionPane.showMessageDialog(this, "Cannot save " + target + "\n" + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(Placement.windowOf(this), "Cannot save " + target + "\n" + e.getMessage(), "Error",
+                JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -665,18 +663,13 @@ public final class ViewerPanel extends JPanel {
     }
 
     private static @NotNull String convert(final @NotNull Mode effective, final byte @NotNull [] bytes, final @Nullable Charset cs) {
-        switch (effective) {
-            case HEX:
-                return hexDump(bytes);
-            case BINARY:
-                return binaryDump(bytes, cs);
-            case HTML:
-                return stripHtml(decode(bytes, cs));
-            case JSON:
-                return JsonPretty.format(decode(bytes, cs));
-            default:
-                return decode(bytes, cs);
-        }
+        return switch (effective) {
+            case HEX -> hexDump(bytes);
+            case BINARY -> binaryDump(bytes, cs);
+            case HTML -> stripHtml(decode(bytes, cs));
+            case JSON -> JsonPretty.format(decode(bytes, cs));
+            default -> decode(bytes, cs);
+        };
     }
 
     /**
@@ -740,7 +733,7 @@ public final class ViewerPanel extends JPanel {
         updateMenus();
         markdown.setDocument(doc);
         markdown.setCaretPosition(0);
-        cards.show((JPanel) markdownScroll.getParent(), "markdown");
+        cards.show(markdownScroll.getParent(), "markdown");
         if (focused) {
             markdown.requestFocusInWindow();
         }
@@ -759,7 +752,8 @@ public final class ViewerPanel extends JPanel {
         try {
             Desktop.getDesktop().browse(e.getURL().toURI());
         } catch (final IOException | URISyntaxException | RuntimeException ex) {
-            JOptionPane.showMessageDialog(this, "Cannot open " + e.getURL() + "\n" + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(Placement.windowOf(this), "Cannot open " + e.getURL() + "\n" + ex.getMessage(), "Error",
+                JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -778,7 +772,7 @@ public final class ViewerPanel extends JPanel {
         unshapedMetrics = doc.getLength() > MAX_I18N_CHARS;
         text.setDocument(doc);
         text.setCaretPosition(0);
-        cards.show((JPanel) textScroll.getParent(), "text");
+        cards.show(textScroll.getParent(), "text");
         if (focused) {
             text.requestFocusInWindow();
         }
@@ -794,7 +788,7 @@ public final class ViewerPanel extends JPanel {
 
     private void showImage() {
         final boolean focused = shownText().isFocusOwner();
-        cards.show((JPanel) imageView.getParent(), "image");
+        cards.show(imageView.getParent(), "image");
         showingImage = true;
         showingMarkdown = false;
         updateMenus();
@@ -1108,7 +1102,7 @@ public final class ViewerPanel extends JPanel {
 
             return;
         }
-        fontSize = factor == 0 ? 13f : Math.max(6f, Math.min(72f, fontSize * factor));
+        fontSize = factor == 0 ? 13f : Math.clamp(fontSize * factor, 6f, 72f);
         text.setFont(text.getFont().deriveFont(fontSize));
         if (showingMarkdown) {
             render();
@@ -1118,8 +1112,8 @@ public final class ViewerPanel extends JPanel {
     }
 
     private void askCharset() {
-        final String name = (String) JOptionPane.showInputDialog(this, "Charset:", "Encoding", JOptionPane.PLAIN_MESSAGE, null,
-            Charset.availableCharsets().keySet().toArray(), charsetName());
+        final String name = (String) JOptionPane.showInputDialog(Placement.windowOf(this), "Charset:", "Encoding", JOptionPane.PLAIN_MESSAGE,
+            null, Charset.availableCharsets().keySet().toArray(), charsetName());
         if (name != null) {
             setCharset(Charset.forName(name));
         }
@@ -1141,7 +1135,7 @@ public final class ViewerPanel extends JPanel {
         try {
             text.print();
         } catch (final PrinterException e) {
-            JOptionPane.showMessageDialog(this, "Print failed: " + e.getMessage(), "Print", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(Placement.windowOf(this), "Print failed: " + e.getMessage(), "Print", JOptionPane.ERROR_MESSAGE);
         }
     }
 }

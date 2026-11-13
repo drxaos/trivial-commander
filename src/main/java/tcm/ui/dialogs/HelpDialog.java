@@ -13,6 +13,8 @@ import javax.swing.table.DefaultTableModel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import tcm.util.Placement;
+
 /**
  * F1 help: implemented keyboard assignments (Total Commander layout).
  */
@@ -171,7 +173,7 @@ public final class HelpDialog {
                 table.setRowSelectionInterval(row, row);
             }
         }
-        d.setLocationRelativeTo(owner);
+        Placement.center(d, owner);
         d.setVisible(true);
     }
 }

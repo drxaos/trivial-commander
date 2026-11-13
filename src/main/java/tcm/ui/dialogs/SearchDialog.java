@@ -52,6 +52,7 @@ import tcm.core.VFile;
 import tcm.core.Vfs;
 import tcm.ui.Icons;
 import tcm.util.Keys;
+import tcm.util.Placement;
 
 /**
  * File search (Alt+F7): name mask/RegEx, text, depth, archives, size and date; results — view, go to,
@@ -131,7 +132,7 @@ public final class SearchDialog extends JDialog {
         installKeys();
         getRootPane().setDefaultButton(start);
         setSize(860, 640);
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowOpened(final WindowEvent e) {

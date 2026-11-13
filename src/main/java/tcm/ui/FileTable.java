@@ -6,12 +6,16 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Arc2D;
+import java.awt.geom.Ellipse2D;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -58,6 +62,9 @@ public final class FileTable extends JTable {
     private static final int RENAME_PAD = 2;
     /** The full name of a cut-off name appears after the mouse rests on it this long. */
     private static final int NAME_TIP_DELAY = 1000;
+    /** Diameter of the ring that counts down to the context menu, and its distance from the mouse. */
+    private static final int HOLD_RING_SIZE = 18;
+    private static final int HOLD_RING_GAP = 8;
 
     @Getter
     private final @NotNull FileTableModel fileModel;
@@ -71,6 +78,8 @@ public final class FileTable extends JTable {
     private int renameRow = -1;
     private @Nullable MouseFilter mouseFilter;
     private int dropRow = -1;
+    private @Nullable Point holdPoint;
+    private double holdProgress;
 
     /** Intercepts mouse events before BasicTableUI; true — the event is handled and goes no further. */
     public interface MouseFilter {
@@ -222,6 +231,58 @@ public final class FileTable extends JTable {
         dropRow = row;
         if (row >= 0 && row < getRowCount()) {
             repaint(getCellRect(row, 0, true).union(getCellRect(row, getColumnCount() - 1, true)));
+        }
+    }
+
+    /**
+     * Ring next to the mouse while the right button is held: the part of the wait for the context menu that has passed (0..1);
+     * null — no ring.
+     */
+    public void setHoldProgress(final @Nullable Point mouse, final double progress) {
+        final Point old = holdPoint;
+        holdPoint = mouse;
+        holdProgress = progress;
+        if (old != null) {
+            repaint(holdRingBounds(old));
+        }
+        if (mouse != null) {
+            repaint(holdRingBounds(mouse));
+        }
+    }
+
+    /** Up and to the right of the mouse, where the pointer does not cover it; pulled back into the visible part of the table. */
+    private @NotNull Rectangle holdRingBounds(final @NotNull Point mouse) {
+        final Rectangle view = getVisibleRect();
+        final int x = Math.max(view.x, Math.min(mouse.x + HOLD_RING_GAP, view.x + view.width - HOLD_RING_SIZE));
+        final int y = Math.max(view.y, Math.min(mouse.y - HOLD_RING_GAP - HOLD_RING_SIZE, view.y + view.height - HOLD_RING_SIZE));
+
+        return new Rectangle(x, y, HOLD_RING_SIZE, HOLD_RING_SIZE);
+    }
+
+    /** Over the rows and the rename field. Black on white whatever the theme: the ring is read on any row color. */
+    @Override
+    public void paint(final Graphics g) {
+        super.paint(g);
+        final Point mouse = holdPoint;
+        if (mouse == null) {
+            return;
+        }
+        final Rectangle r = holdRingBounds(mouse);
+        final Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+            g2.setColor(Color.WHITE);
+            g2.fill(new Ellipse2D.Double(r.x + 0.5, r.y + 0.5, r.width - 1, r.height - 1));
+            g2.setColor(Color.BLACK);
+            g2.setStroke(new BasicStroke(1f));
+            g2.draw(new Ellipse2D.Double(r.x + 0.5, r.y + 0.5, r.width - 1, r.height - 1));
+            // clockwise from 12 o'clock, as a clock hand goes
+            final double inset = 3.5;
+            g2.fill(new Arc2D.Double(r.x + inset, r.y + inset, r.width - 2 * inset, r.height - 2 * inset, 90,
+                -360 * Math.max(0, Math.min(1, holdProgress)), Arc2D.PIE));
+        } finally {
+            g2.dispose();
         }
     }
 

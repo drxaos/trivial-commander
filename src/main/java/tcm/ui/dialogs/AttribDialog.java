@@ -32,6 +32,7 @@ import org.jetbrains.annotations.Nullable;
 import tcm.core.AttribChange;
 import tcm.core.AttribChange.Bit;
 import tcm.core.VFile;
+import tcm.util.Placement;
 
 /**
  * Change attributes: permissions (or DOS attributes), modification time, processing directory contents.
@@ -74,7 +75,7 @@ public final class AttribDialog extends JDialog {
         Dialogs.bindKey(this, "ENTER", this::accept);
         resetBoxes();
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
     }
 
     /** null — cancelled or nothing changed. */

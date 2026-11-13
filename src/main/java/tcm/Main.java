@@ -31,6 +31,8 @@ public final class Main {
 
     public static void main(final String[] args) {
         initNativeImage();
+        // macOS: the name in the application menu and the Dock when started as a jar (the app bundle has its own); before AWT starts
+        System.setProperty("apple.awt.application.name", "Trivial Commander");
         // on Windows the desktop hints (ClearType) apply; forced grayscale makes letters look bolder than digits
         if (!System.getProperty("os.name", "").startsWith("Windows")) {
             System.setProperty("awt.useSystemAAFontSettings", "on");

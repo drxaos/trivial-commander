@@ -18,6 +18,8 @@ import org.jetbrains.annotations.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 
+import tcm.util.Placement;
+
 /**
  * Text search in viewer/editor/compare: F7 — dialog, F3/Shift+F3 — next/previous, Ctrl+F3 — reverse direction.
  */
@@ -36,7 +38,7 @@ public final class TextFinder {
         field.selectAll();
         final Object[] message = {"Search for:", field, caseBox, backBox};
         final JOptionPane pane = new JOptionPane(message, JOptionPane.PLAIN_MESSAGE, JOptionPane.OK_CANCEL_OPTION);
-        final JDialog dialog = pane.createDialog(parent, "Find");
+        final JDialog dialog = pane.createDialog(Placement.windowOf(parent), "Find");
         dialog.addWindowFocusListener(new WindowAdapter() {
             @Override
             public void windowGainedFocus(final WindowEvent e) {
@@ -81,7 +83,7 @@ public final class TextFinder {
             }
         }
         if (idx < 0) {
-            JOptionPane.showMessageDialog(area, "\"" + query + "\" not found.", "Find", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(Placement.windowOf(area), "\"" + query + "\" not found.", "Find", JOptionPane.INFORMATION_MESSAGE);
 
             return false;
         }

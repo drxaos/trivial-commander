@@ -46,6 +46,7 @@ import tcm.core.Vfs;
 import tcm.core.ZipEdit;
 import tcm.core.ZipOps;
 import tcm.util.Keys;
+import tcm.util.Placement;
 
 /**
  * Multi-rename (Ctrl+M): name/extension mask with [N] [E] [C] [P] [YMD] [hms], search and replace, case.
@@ -95,7 +96,7 @@ public final class MultiRenameDialog extends JDialog {
         installKeys();
         recompute();
         setSize(900, 560);
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
     }
 
     /** true — something was renamed (the panel needs refreshing). */

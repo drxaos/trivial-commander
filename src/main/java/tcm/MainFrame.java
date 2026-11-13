@@ -10,6 +10,7 @@ import java.awt.Insets;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.Rectangle;
+import java.awt.Taskbar;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
@@ -134,6 +135,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         super(APP_TITLE);
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setIconImage(appIcon());
+        setDockIcon();
         // the MIME database and icon theme are read while the panels are being built
         SystemIcons.preload();
         // tabs need the command line already at creation (key bindings)
@@ -753,6 +755,10 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
             throw new IllegalArgumentException("Bad key: " + stroke);
         }
         globalKeys.put(ks, action);
+        final KeyStroke twin = Keys.macTwin(ks);
+        if (twin != null) {
+            globalKeys.putIfAbsent(twin, action);
+        }
     }
 
     private void registerGlobalKeys() {
@@ -1271,6 +1277,29 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         saveSettings();
         dispose();
         System.exit(0);
+    }
+
+    /**
+     * macOS shows no window icons: a program started as a jar gets the Java cup in the Dock unless it sets its own. Inside the app
+     * bundle the icon comes from the bundle, and this one is the same picture.
+     */
+    private static void setDockIcon() {
+        if (!Keys.MAC || !Taskbar.isTaskbarSupported() || !Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_IMAGE)) {
+            return;
+        }
+        final int size = 256;
+        final BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        final Graphics2D g = img.createGraphics();
+        // the margin macOS icons keep around the shape
+        g.translate(size / 10.0, size / 10.0);
+        g.scale(size * 0.8 / Icons.FOLDER.getIconWidth(), size * 0.8 / Icons.FOLDER.getIconHeight());
+        Icons.FOLDER.paintIcon(null, g, 0, 0);
+        g.dispose();
+        try {
+            Taskbar.getTaskbar().setIconImage(img);
+        } catch (final RuntimeException e) {
+            // the Dock keeps the default icon
+        }
     }
 
     private static @NotNull BufferedImage appIcon() {

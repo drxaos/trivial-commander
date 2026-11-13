@@ -76,7 +76,17 @@ public final class ConsoleWindow {
 
     public static @NotNull List<String> shellCommand(final @NotNull String command) {
         // cmd strips the outer quotes of /c, so a quoted program path followed by arguments needs one more pair
-        return WINDOWS ? List.of("cmd.exe", "/c", "\"" + command + "\"") : List.of("/bin/sh", "-c", command);
+        if (WINDOWS) {
+            return List.of("cmd.exe", "/c", "\"" + command + "\"");
+        }
+        if (Keys.MAC) {
+            // an app started from Finder gets the bare system PATH: a login shell reads the user's profile (Homebrew and the like)
+            final String shell = System.getenv("SHELL");
+
+            return List.of(shell == null || shell.isBlank() ? "/bin/zsh" : shell, "-l", "-c", command);
+        }
+
+        return List.of("/bin/sh", "-c", command);
     }
 
     /** Encoding of the child's output and input: the OEM code page of the console on Windows (chcp), UTF-8 elsewhere. */

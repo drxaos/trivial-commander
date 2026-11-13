@@ -42,6 +42,30 @@ On launch the native executable registers a shortcut in the Start Menu (`%APPDAT
 with `AppUserModelID` for taskbar grouping, and automatically updates the shortcut when the executable has moved.
 The Linux archives are skipped on Windows.
 
+#### macOS
+
+```bash
+mvn -Pdmg package      # target/tcm-1.0.0-macos-aarch64-jvm.dmg (amd64 on Intel)
+```
+
+The disk image holds `Trivial Commander.app` (the jar and a Java runtime cut down by `jlink` to the modules the jar needs, taken from
+the JDK the build runs on) and a link to `/Applications` to drag it to. Built on macOS only (`hdiutil`, `codesign`); scripts and the
+icon are in `src/macos` (`make-icns.sh` regenerates `tcm.icns` from `tcm.svg`).
+The app is signed ad hoc, not with a developer certificate: a downloaded copy has to be let through Gatekeeper once — right click →
+Open, or `xattr -dr com.apple.quarantine "/Applications/Trivial Commander.app"`.
+
+`mvn -Pnative package` on macOS packs the native executable and its `lib*.dylib` the same way into `target/tcm-1.0.0-macos-aarch64.dmg`.
+This needs a GraalVM whose Native Image builds AWT on macOS (Liberica NIK Full, GraalVM 25.1+), and the reachability metadata in
+`src/main/resources/META-INF/native-image` was collected on Linux and Windows only: collect the macOS part first by running the jar
+on a Mac with the tracing agent (`java -agentlib:native-image-agent=config-merge-dir=src/main/resources/META-INF/native-image/tcm/tcm
+-jar target/tcm-1.0.0.jar`) and walking through the program. File icons from Launch Services work in the jar and in the JVM app only.
+
+On macOS every `Ctrl` shortcut also works with `Cmd` (`Cmd+C`/`Cmd+V`, `Cmd+T`, `Cmd+←/→`...; not `Cmd+Q`/`H`/`M`/`Tab`/`Space`, which
+belong to the system): the system takes `Ctrl+←/→/↑/↓` and `Ctrl+F1`…`F8` for Mission Control and keyboard navigation unless they are
+turned off in System Settings → Keyboard → Keyboard Shortcuts. `F1`…`F12` need `fn` held unless "Use F1, F2, etc. keys as standard
+function keys" is on. An `.app` is a directory: `Enter` goes inside, `Alt+F3` (Open with system) starts it. The command line runs
+commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile applies to an app started from Finder too.
+
 ## Features
 
 - **Two panels** with a Name / Ext / Size / Date / Attr table, sorting by clicking the header or `Ctrl+F3..F7`,
@@ -63,6 +87,7 @@ The Linux archives are skipped on Windows.
   full path in the tooltip), the strip scrolls with the mouse wheel,
   history `Alt+←/→`, `Alt+↓`, favorite directories `Ctrl+D`, directory tree `Alt+F10`, swap panels `Ctrl+U`/`Ctrl+Shift+U`,
   the other panel's directory into the active one — `Ctrl+=` (Commands menu and a toolbar button).
+  A tab brought to the front picks up the view settings changed while it was in the background: brief/full, thumbnails, hidden files.
 - **Auto-refresh**: panels are re-read when focus returns to the window and at most once per second on changes
   in the local directories open in them (WatchService) — e.g. you can see a downloading file grow.
   Cursor, marks, scroll position and in-panel rename are not disturbed; search results are not re-read.
@@ -164,7 +189,8 @@ The Linux archives are skipped on Windows.
   - **Image** menu (in the menu bar and on right click): Zoom (1:1, Fit, In, Out), Flip (Horizontal `H`, Vertical `Shift+H`),
     Rotate (CW `R`, CCW `Shift+R`).
 - **Mouse in the panel**:
-  - right-button press marks a file, right-button drag marks several files; holding the right button for 1 s — context menu;
+  - right-button press marks a file, right-button drag marks several files; holding the right button for 1 s — context menu
+    (after 200 ms a small black-and-white ring next to the pointer fills up as the menu gets closer);
   - holding the right button on empty space — directory menu: New (Folder, File), Terminal, Explore (file manager), Properties;
   - dragging files outside the window — into another program (copy; only files from disk, not from an archive);
   - clicking the `F8 Delete` button with `Shift` — delete bypassing the trash;
@@ -191,4 +217,5 @@ The Linux archives are skipped on Windows.
 - **Command line**: `cd`, `md`, `rd` are built in, everything else runs in a console window (stdout/stderr, stdin, Stop) in the active panel's directory;
   letters typed in the panel go to the line, the line is a history drop-down (arrow on the right, `Alt+F8`, `Ctrl+↓`), `Ctrl+E` — previous command,
   `Ctrl+Enter`/`Ctrl+P` — name/path into the line.
+- **Dialogs** open in the middle of the window they belong to (main window, viewer, editor), whole on its screen.
 - **Themes** FlatLaf (Configuration): Light, Dark, IntelliJ, Darcula. Window, tab and history state is saved (`java.util.prefs`) on exit (and on `Cmd+Q` on macOS) and every 30 s.

@@ -84,8 +84,7 @@ public final class FilePanel extends JPanel {
         tabs.addChangeListener(e -> {
             if (tabs.getSelectedComponent() instanceof PanelTab) {
                 final PanelTab tab = getCurrentTab();
-                tab.setThumbs(host.isThumbs());
-                tab.setBrief(host.isBrief());
+                tab.syncView();
                 tabUpdated(tab);
                 host.panelChanged(this);
             }

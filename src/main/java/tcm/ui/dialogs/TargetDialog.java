@@ -24,6 +24,8 @@ import org.jetbrains.annotations.Nullable;
 
 import lombok.Getter;
 
+import tcm.util.Placement;
+
 /**
  * Copy/move/unpack dialog: target path, "only files of type" mask, OK / F2 Queue / F10 Tree / Cancel.
  * F5/F6 — toggle selection in the path, Ctrl+D — favorite directories, F8 — mask templates, Ctrl+Home — cursor before the name.
@@ -87,7 +89,7 @@ public final class TargetDialog extends JDialog {
         getRootPane().setDefaultButton(ok);
         installKeys();
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
     }
 
     public static @Nullable Result show(

@@ -2361,6 +2361,36 @@
         {
           "name": "pData"
         }
+      ],
+      "methods": [
+        {
+          "name": "dispatchCommittedText",
+          "parameterTypes": [
+            "java.lang.String",
+            "long"
+          ]
+        },
+        {
+          "name": "flushText",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.awt.X11InputMethod",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "dispatchComposedText",
+          "parameterTypes": [
+            "java.lang.String",
+            "int[]",
+            "int",
+            "int",
+            "int",
+            "long"
+          ]
+        }
       ]
     },
     {

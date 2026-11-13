@@ -1,20 +1,18 @@
 package tcm.ui.dialogs;
 
 import java.awt.Component;
-import java.awt.event.ActionEvent;
 
-import javax.swing.AbstractAction;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
-import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
-import javax.swing.JRootPane;
-import javax.swing.KeyStroke;
 import javax.swing.text.JTextComponent;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import tcm.util.Keys;
+import tcm.util.Placement;
 
 /**
  * Common dialog bits: Esc, button hotkeys, error messages.
@@ -25,14 +23,7 @@ public final class Dialogs {
     }
 
     public static void bindKey(final @NotNull JDialog dialog, final @NotNull String key, final @NotNull Runnable action) {
-        final JRootPane root = dialog.getRootPane();
-        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(key), key);
-        root.getActionMap().put(key, new AbstractAction() {
-            @Override
-            public void actionPerformed(final ActionEvent e) {
-                action.run();
-            }
-        });
+        Keys.bindWindow(dialog.getRootPane(), key, action);
     }
 
     public static void bindEscape(final @NotNull JDialog dialog) {
@@ -72,7 +63,7 @@ public final class Dialogs {
 
     public static void error(final @Nullable Component parent, final @NotNull String message, final @Nullable Throwable e) {
         final String details = e == null ? "" : "\n" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-        JOptionPane.showMessageDialog(parent, message + details, "Error", JOptionPane.ERROR_MESSAGE);
+        JOptionPane.showMessageDialog(Placement.windowOf(parent), message + details, "Error", JOptionPane.ERROR_MESSAGE);
     }
 
     /** Delete confirmation; [0] — "permanently" chosen. null — cancelled. */
@@ -83,7 +74,8 @@ public final class Dialogs {
         final Object[] message = archive
             ? new Object[] {"Delete " + what + " from archive?", "Entries are removed from the archive permanently."}
             : new Object[] {"Delete " + what + "?", box};
-        final int answer = JOptionPane.showConfirmDialog(parent, message, "Delete", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        final int answer = JOptionPane.showConfirmDialog(Placement.windowOf(parent), message, "Delete", JOptionPane.OK_CANCEL_OPTION,
+            JOptionPane.WARNING_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) {
             return null;
         }

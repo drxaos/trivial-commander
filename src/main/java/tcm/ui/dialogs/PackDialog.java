@@ -26,6 +26,8 @@ import org.jetbrains.annotations.Nullable;
 
 import lombok.Getter;
 
+import tcm.util.Placement;
+
 /**
  * Packing: archive name, format (ZIP/JAR or TAR, TAR.GZ, TAR.BZ2, TAR.XZ), recursion, moving into the archive.
  */
@@ -99,7 +101,7 @@ public final class PackDialog extends JDialog {
         Dialogs.bindKey(this, "F5", () -> Dialogs.cycleSelection(archive));
         Dialogs.bindKey(this, "F10", this::tree);
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
         archive.requestFocusInWindow();
         selectBaseName();
     }

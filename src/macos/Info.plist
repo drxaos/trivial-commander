@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- @VERSION@ is filled in by build.sh -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Trivial Commander</string>
+    <key>CFBundleDisplayName</key>
+    <string>Trivial Commander</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.github.drxaos.trivial-commander</string>
+    <key>CFBundleExecutable</key>
+    <string>tcm</string>
+    <key>CFBundleIconFile</key>
+    <string>tcm</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <!-- a file manager reads every folder: these texts are shown in the system's permission prompts -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Trivial Commander shows and manages the files in the Desktop folder.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Trivial Commander shows and manages the files in the Documents folder.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Trivial Commander shows and manages the files in the Downloads folder.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Trivial Commander shows and manages the files on removable volumes.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Trivial Commander shows and manages the files on network volumes.</string>
+</dict>
+</plist>

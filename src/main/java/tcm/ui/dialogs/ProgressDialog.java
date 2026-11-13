@@ -18,6 +18,7 @@ import javax.swing.WindowConstants;
 import org.jetbrains.annotations.NotNull;
 
 import tcm.ops.JobContext;
+import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
@@ -67,7 +68,7 @@ public final class ProgressDialog extends JDialog {
         Dialogs.bindKey(this, "ESCAPE", ctx::cancel);
         setMinimumSize(new Dimension(520, 0));
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
         timer = new Timer(REFRESH_MS, e -> update());
     }
 

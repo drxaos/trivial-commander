@@ -36,6 +36,9 @@ final class PanelMouse implements FileTable.MouseFilter {
 
     private static final int DRAG_THRESHOLD = 6;
     private static final int LONG_PRESS_MS = 1000;
+    /** A ring next to the mouse shows the rest of the wait for the menu; a shorter press (marking a file) shows nothing. */
+    private static final int HOLD_RING_DELAY_MS = 200;
+    private static final int HOLD_TICK_MS = 25;
     private static final int DEFAULT_DOUBLE_CLICK_MS = 500;
 
     private final @NotNull PanelTab tab;
@@ -47,6 +50,7 @@ final class PanelMouse implements FileTable.MouseFilter {
     private boolean markState;
     private @Nullable Point rightPoint;
     private final @NotNull Timer longPress;
+    private long holdStart;
     private final @NotNull PanelExport export;
 
     private int leftRow = -1;
@@ -64,8 +68,7 @@ final class PanelMouse implements FileTable.MouseFilter {
     PanelMouse(final @NotNull PanelTab tab) {
         this.tab = tab;
         this.table = tab.getTable();
-        this.longPress = new Timer(LONG_PRESS_MS, e -> showMenu());
-        longPress.setRepeats(false);
+        this.longPress = new Timer(HOLD_TICK_MS, e -> holdTick());
         this.export = new PanelExport(table);
     }
 
@@ -93,7 +96,7 @@ final class PanelMouse implements FileTable.MouseFilter {
                 rightDrag(e);
             } else if (rightPoint.distance(e.getPoint()) >= DRAG_THRESHOLD) {
                 // dragged over empty space — this is not a hold for the menu
-                longPress.stop();
+                stopHold();
             }
 
             return true;
@@ -143,7 +146,7 @@ final class PanelMouse implements FileTable.MouseFilter {
                 table.setCursorRow(rightRow);
                 tab.updateLabels();
             }
-            longPress.restart();
+            startHold();
 
             return true;
         }
@@ -205,7 +208,7 @@ final class PanelMouse implements FileTable.MouseFilter {
 
                 return true;
             }
-            longPress.stop();
+            stopHold();
             rightRow = -1;
             rightPoint = null;
 
@@ -251,7 +254,7 @@ final class PanelMouse implements FileTable.MouseFilter {
         if (!rightDragged) {
             // the first row was already marked on press
             rightDragged = true;
-            longPress.stop();
+            stopHold();
         }
         final int step = row > rightLastRow ? 1 : -1;
         for (int r = rightLastRow + step; r != row + step; r += step) {
@@ -260,6 +263,27 @@ final class PanelMouse implements FileTable.MouseFilter {
         rightLastRow = row;
         table.setCursorRow(row);
         tab.updateLabels();
+    }
+
+    private void startHold() {
+        holdStart = System.nanoTime();
+        longPress.restart();
+    }
+
+    private void stopHold() {
+        longPress.stop();
+        table.setHoldProgress(null, 0);
+    }
+
+    /** The ring fills from the moment it appears until the menu opens. */
+    private void holdTick() {
+        final long held = (System.nanoTime() - holdStart) / 1_000_000;
+        if (held >= LONG_PRESS_MS) {
+            stopHold();
+            showMenu();
+        } else if (held >= HOLD_RING_DELAY_MS && rightPoint != null && !rightDragged && rightRow < tab.getModel().getRowCount()) {
+            table.setHoldProgress(rightPoint, (double) (held - HOLD_RING_DELAY_MS) / (LONG_PRESS_MS - HOLD_RING_DELAY_MS));
+        }
     }
 
     /** Right button held without dragging: menu for the file under the mouse, on empty space — for the current directory. */

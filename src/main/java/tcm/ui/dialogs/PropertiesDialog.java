@@ -26,6 +26,7 @@ import org.jetbrains.annotations.NotNull;
 
 import tcm.core.TreeStats;
 import tcm.core.VFile;
+import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
@@ -56,7 +57,7 @@ public final class PropertiesDialog extends JDialog {
         Dialogs.bindEscape(this);
         Dialogs.bindKey(this, "ENTER", this::dispose);
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
         calculate(files);
     }
 

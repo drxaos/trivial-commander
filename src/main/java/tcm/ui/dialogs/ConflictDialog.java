@@ -23,6 +23,7 @@ import tcm.apps.ViewerWindow;
 import tcm.core.VFile;
 import tcm.core.Vfs;
 import tcm.ops.Decision;
+import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
@@ -71,7 +72,7 @@ public final class ConflictDialog extends JDialog {
         Dialogs.bindKey(this, "ctrl C", () -> copy(clip));
         Dialogs.bindKey(this, "ctrl INSERT", () -> copy(clip));
         pack();
-        setLocationRelativeTo(owner);
+        Placement.center(this, owner);
     }
 
     public static @NotNull Decision ask(final @Nullable Window owner, final @NotNull String source, final @NotNull String target) {

@@ -28,6 +28,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import tcm.core.VFile;
+import tcm.util.Placement;
 
 /**
  * Tool windows (viewer, editor, compare, console). From a modal dialog (e.g. an overwrite question)
@@ -92,11 +93,11 @@ public final class AppWindows {
         final Path dir = file.isLocal() ? file.getHostPath().getParent() : null;
         final JFileChooser chooser = new JFileChooser(dir != null ? dir.toFile() : null);
         chooser.setSelectedFile(new File(chooser.getCurrentDirectory(), file.getName()));
-        if (chooser.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) {
+        if (chooser.showSaveDialog(Placement.windowOf(parent)) != JFileChooser.APPROVE_OPTION) {
             return null;
         }
         final Path target = chooser.getSelectedFile().toPath().toAbsolutePath();
-        if (Files.exists(target) && JOptionPane.showConfirmDialog(parent, "Overwrite " + target + "?", "Save as",
+        if (Files.exists(target) && JOptionPane.showConfirmDialog(Placement.windowOf(parent), "Overwrite " + target + "?", "Save as",
             JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
             return null;
         }
@@ -119,7 +120,7 @@ public final class AppWindows {
             w.setIconImages(owner.getIconImages());
         }
         w.setSize(900, 650);
-        w.setLocationRelativeTo(owner);
+        Placement.center(w, owner);
 
         return w;
     }
@@ -157,8 +158,7 @@ public final class AppWindows {
 
     /** F11: maximize/restore. */
     public static void toggleMaximized(final @NotNull Window w) {
-        if (w instanceof Frame) {
-            final Frame f = (Frame) w;
+        if (w instanceof final Frame f) {
             f.setExtendedState(f.getExtendedState() == Frame.MAXIMIZED_BOTH ? Frame.NORMAL : Frame.MAXIMIZED_BOTH);
         }
     }
