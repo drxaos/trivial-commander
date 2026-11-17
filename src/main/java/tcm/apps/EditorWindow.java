@@ -33,6 +33,7 @@ import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultEditorKit;
 import javax.swing.text.PlainDocument;
+import javax.swing.text.Utilities;
 import javax.swing.undo.UndoManager;
 
 import org.jetbrains.annotations.NotNull;
@@ -221,6 +222,32 @@ public final class EditorWindow {
         final Action selectEnd = area.getActionMap().get(DefaultEditorKit.selectionEndLineAction);
         Keys.bind(area, JComponent.WHEN_FOCUSED, "END", () -> lineEnd(false, end));
         Keys.bind(area, JComponent.WHEN_FOCUSED, "shift END", () -> lineEnd(true, selectEnd));
+        final Action down = area.getActionMap().get(DefaultEditorKit.downAction);
+        final Action selectDown = area.getActionMap().get(DefaultEditorKit.selectionDownAction);
+        Keys.bind(area, JComponent.WHEN_FOCUSED, "DOWN", () -> lineDown(false, down));
+        Keys.bind(area, JComponent.WHEN_FOCUSED, "shift DOWN", () -> lineDown(true, selectDown));
+    }
+
+    /** Down on the last (visual) row moves the caret to the end of the text instead of leaving it in place. */
+    private void lineDown(final boolean select, final @Nullable Action standard) {
+        try {
+            final int length = area.getDocument().getLength();
+            final int pos = area.getCaretPosition();
+            if (Utilities.getRowEnd(area, pos) >= length) {
+                if (select) {
+                    area.moveCaretPosition(length);
+                } else {
+                    area.setCaretPosition(length);
+                }
+
+                return;
+            }
+        } catch (final BadLocationException e) {
+            // no layout yet: fall back to the standard action
+        }
+        if (standard != null) {
+            standard.actionPerformed(new ActionEvent(area, ActionEvent.ACTION_PERFORMED, null));
+        }
     }
 
     /**
