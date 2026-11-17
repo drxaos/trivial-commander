@@ -79,6 +79,7 @@ import tcm.ui.CommandLine;
 import tcm.ui.FilePanel;
 import tcm.ui.FileTable;
 import tcm.ui.FileTableModel;
+import tcm.ui.HintMenuItem;
 import tcm.ui.Icons;
 import tcm.ui.LayoutSwitchKeys;
 import tcm.ui.PanelHost;
@@ -264,6 +265,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         menu.add(item("View", "F3", () -> commands.view(true)));
         menu.add(item("Edit", "F4", commands::edit));
         menu.add(item("Open with system", "alt F3", commands::viewExternal));
+        menu.add(item("Open with...", null, commands::openWith));
         menu.addSeparator();
         menu.add(item("Copy to clipboard", "ctrl C", () -> commands.copyToClipboard(false)));
         menu.add(item("Cut to clipboard", "ctrl X", () -> commands.copyToClipboard(true)));
@@ -918,10 +920,12 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
 
     // ---- menu, toolbar, F-keys ----
 
+    /** A menu item; an accelerator on a key that open menus use (Enter: the panel binds it) is shown but not bound. */
     private static @NotNull JMenuItem item(final @NotNull String text, final @Nullable String accel, final @NotNull Runnable action) {
-        final JMenuItem it = new JMenuItem(text);
-        if (accel != null) {
-            it.setAccelerator(KeyStroke.getKeyStroke(accel));
+        final KeyStroke ks = accel == null ? null : KeyStroke.getKeyStroke(accel);
+        final JMenuItem it = ks != null && HintMenuItem.isMenuKey(ks) ? new HintMenuItem(text, ks) : new JMenuItem(text);
+        if (ks != null) {
+            it.setAccelerator(ks);
         }
         it.addActionListener(e -> action.run());
 

@@ -28,6 +28,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import tcm.core.VFile;
+import tcm.ui.HintMenuItem;
 import tcm.util.Placement;
 
 /**
@@ -69,9 +70,14 @@ public final class AppWindows {
         }
     }
 
-    /** Menu item; the window handles the key itself, here it is only labeled. */
+    /**
+     * Menu item; the window handles the key itself, here it is only labeled. A key that open menus use (Escape) stays a label only:
+     * live, it would close the window instead of the menu.
+     */
     static @NotNull JMenuItem item(final @NotNull String text, final @Nullable String accel, final @NotNull Runnable action) {
-        return setup(new JMenuItem(text), accel, action);
+        final KeyStroke ks = accel == null ? null : KeyStroke.getKeyStroke(accel);
+
+        return setup(ks != null && HintMenuItem.isMenuKey(ks) ? new HintMenuItem(text, ks) : new JMenuItem(text), accel, action);
     }
 
     /** Checkbox item; the menu owner sets the check mark each time the menu opens. */

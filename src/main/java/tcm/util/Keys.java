@@ -9,6 +9,7 @@ import java.util.Set;
 import javax.swing.AbstractAction;
 import javax.swing.JComponent;
 import javax.swing.KeyStroke;
+import javax.swing.MenuSelectionManager;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -68,7 +69,27 @@ public final class Keys {
         bind(c, JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT, key, action);
     }
 
+    /**
+     * The key works anywhere in the window. Escape closes an open menu first: a window binding is served before the menu's own
+     * Escape, and would close the whole viewer, editor or dialog when only the menu was meant.
+     */
     public static void bindWindow(final @NotNull JComponent c, final @NotNull String key, final @NotNull Runnable action) {
-        bind(c, JComponent.WHEN_IN_FOCUSED_WINDOW, key, action);
+        final boolean escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0).equals(KeyStroke.getKeyStroke(key));
+        bind(c, JComponent.WHEN_IN_FOCUSED_WINDOW, key, escape ? () -> {
+            if (!closeMenu()) {
+                action.run();
+            }
+        } : action);
+    }
+
+    /** Closes the open menu or popup menu, if any; false — none was open. */
+    private static boolean closeMenu() {
+        final MenuSelectionManager menus = MenuSelectionManager.defaultManager();
+        if (menus.getSelectedPath().length == 0) {
+            return false;
+        }
+        menus.clearSelectedPath();
+
+        return true;
     }
 }

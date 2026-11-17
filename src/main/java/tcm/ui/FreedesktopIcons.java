@@ -15,7 +15,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -27,27 +26,28 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import tcm.core.VFile;
+import tcm.core.XdgMime;
 
 /**
- * Freedesktop file icons: the MIME type by name from shared-mime-info (globs2), the icon name from the MIME type, the icon file
- * from the current icon theme and the themes it inherits, hicolor last. PNG and SVG icons (rendered with jsvg).
+ * Freedesktop file icons: the MIME type by name from shared-mime-info (globs2, see {@link XdgMime}), the icon name from the MIME type,
+ * the icon file from the current icon theme and the themes it inherits, hicolor last. PNG and SVG icons (rendered with jsvg).
  * Files are matched by name only, without reading their content, so archive entries get icons too.
  */
 final class FreedesktopIcons implements SystemIcons.Provider {
 
-    private static final String GLOB_CHARS = "*?[";
-    private static final Set<String> ICON_CONTEXTS = Set.of("MimeTypes", "Legacy");
+    /** Panel icons come from these contexts only: fewer directories to list, and no application icon stands in for a file type. */
+    private static final Set<String> MIME_CONTEXTS = Set.of("MimeTypes", "Legacy");
+    private static final Path PIXMAPS = Path.of("/usr/share/pixmaps");
+    private static final List<String> IMAGE_EXTENSIONS = List.of(".png", ".svg", ".xpm");
+
+    /** Themes indexed in every context, for the icons of desktop entries; built on first use. */
+    private static @Nullable List<Theme> appThemes;
 
     private final int size;
-    private final List<Path> dataDirs = dataDirs();
-    /** Literal names ("Makefile") and extensions ("tar.gz") → MIME type; case-sensitive ones are kept as is, others in lower case. */
-    private final Map<String, String> namesCs = new HashMap<>();
-    private final Map<String, String> names = new HashMap<>();
-    private final Map<String, String> extsCs = new HashMap<>();
-    private final Map<String, String> exts = new HashMap<>();
+    private final XdgMime mimeDb;
     private final Map<String, String> customIcons = new HashMap<>();
     private final Map<String, String> genericIcons = new HashMap<>();
-    private final List<Theme> themes = new ArrayList<>();
+    private final List<Theme> themes;
 
     FreedesktopIcons(final int size) {
         this(size, themeName());
@@ -55,35 +55,22 @@ final class FreedesktopIcons implements SystemIcons.Provider {
 
     FreedesktopIcons(final int size, final @NotNull String theme) {
         this.size = size;
+        final List<Path> dataDirs = XdgMime.dataDirs();
+        mimeDb = new XdgMime(dataDirs);
         for (final Path dir : dataDirs) {
-            final Path mime = dir.resolve("mime");
-            readGlobs(mime.resolve("globs2"));
-            readPairs(mime.resolve("icons"), customIcons);
-            readPairs(mime.resolve("generic-icons"), genericIcons);
+            final Path mimeDir = dir.resolve("mime");
+            readPairs(mimeDir.resolve("icons"), customIcons);
+            readPairs(mimeDir.resolve("generic-icons"), genericIcons);
         }
-        loadThemes(theme);
-        if (exts.isEmpty() || themes.isEmpty()) {
+        themes = loadThemes(theme, iconBaseDirs(dataDirs), MIME_CONTEXTS);
+        if (!mimeDb.hasGlobs() || themes.isEmpty()) {
             throw new IllegalStateException("no MIME database or icon theme");
         }
     }
 
     @Override
     public @Nullable String key(final @NotNull VFile file) {
-        final String name = file.getName();
-        final String lower = name.toLowerCase(Locale.ROOT);
-        String mime = namesCs.get(name);
-        if (mime == null) {
-            mime = names.get(lower);
-        }
-        // the longest matching extension wins: "a.tar.gz" is a compressed tar, not just gzip
-        for (int dot = name.indexOf('.'); mime == null && dot >= 0; dot = name.indexOf('.', dot + 1)) {
-            mime = extsCs.get(name.substring(dot + 1));
-            if (mime == null) {
-                mime = exts.get(lower.substring(dot + 1));
-            }
-        }
-
-        return mime;
+        return mimeDb.byName(file.getName());
     }
 
     @Override
@@ -91,7 +78,7 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         for (final String iconName : iconNames(mime)) {
             for (final Theme theme : themes) {
                 final Path found = theme.find(iconName, size);
-                final BufferedImage img = found == null ? null : read(found);
+                final BufferedImage img = found == null ? null : read(found, size);
                 if (img != null) {
                     return SystemIcons.toIcon(img);
                 }
@@ -101,7 +88,61 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         return null;
     }
 
-    private @Nullable BufferedImage read(final @NotNull Path file) throws IOException {
+    /**
+     * The icon of a desktop entry's Icon key: an absolute file, or a name looked up in the current theme, the themes it inherits and
+     * hicolor in any context, then in /usr/share/pixmaps. Null when there is none or it cannot be read. Reads files: not on the EDT.
+     */
+    static @Nullable Icon appIcon(final @NotNull String icon, final int size) {
+        try {
+            final Path file = findAppIcon(icon, size);
+            final BufferedImage img = file == null ? null : read(file, size);
+
+            return img == null ? null : SystemIcons.toIcon(img);
+        } catch (final IOException | RuntimeException e) {
+            // a damaged icon file: the entry is listed without an icon
+            return null;
+        }
+    }
+
+    /** Synchronized: theme directories are listed lazily without locking, and icon loaders of successive dialogs may overlap. */
+    private static synchronized @Nullable Path findAppIcon(final @NotNull String icon, final int size) {
+        if (icon.startsWith("/")) {
+            final Path p = Path.of(icon);
+
+            return Files.isRegularFile(p) ? p : null;
+        }
+        // the spec wants a bare name, yet some entries give "name.png"
+        String name = icon;
+        for (final String ext : IMAGE_EXTENSIONS) {
+            if (name.endsWith(ext)) {
+                name = name.substring(0, name.length() - ext.length());
+            }
+        }
+        for (final Theme theme : appThemes()) {
+            final Path found = theme.find(name, size);
+            if (found != null) {
+                return found;
+            }
+        }
+        for (final String candidate : List.of(icon, name + ".png", name + ".svg")) {
+            final Path p = PIXMAPS.resolve(candidate);
+            if (Files.isRegularFile(p)) {
+                return p;
+            }
+        }
+
+        return null;
+    }
+
+    private static synchronized @NotNull List<Theme> appThemes() {
+        if (appThemes == null) {
+            appThemes = loadThemes(themeName(), iconBaseDirs(XdgMime.dataDirs()), null);
+        }
+
+        return appThemes;
+    }
+
+    private static @Nullable BufferedImage read(final @NotNull Path file, final int size) throws IOException {
         if (!file.getFileName().toString().endsWith(".svg")) {
             return ImageIO.read(file.toFile());
         }
@@ -129,29 +170,6 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         return new ArrayList<>(result);
     }
 
-    /** Lines "weight:mime:glob[:flags]", sorted by weight: the first pattern wins, as do earlier (user) directories. */
-    private void readGlobs(final @NotNull Path file) {
-        for (final String line : lines(file)) {
-            final String[] parts = line.split(":");
-            if (parts.length < 3 || line.startsWith("#")) {
-                continue;
-            }
-            final String mime = parts[1];
-            final String glob = parts[2];
-            final boolean cs = parts.length > 3 && parts[3].contains("cs");
-            if (glob.startsWith("*.") && !containsGlob(glob.substring(2))) {
-                final String ext = glob.substring(2);
-                (cs ? extsCs : exts).putIfAbsent(cs ? ext : ext.toLowerCase(Locale.ROOT), mime);
-            } else if (!containsGlob(glob)) {
-                (cs ? namesCs : names).putIfAbsent(cs ? glob : glob.toLowerCase(Locale.ROOT), mime);
-            }
-        }
-    }
-
-    private static boolean containsGlob(final @NotNull String s) {
-        return s.chars().anyMatch(c -> GLOB_CHARS.indexOf(c) >= 0);
-    }
-
     /** Lines "mime:icon-name". */
     private static void readPairs(final @NotNull Path file, final @NotNull Map<String, String> target) {
         for (final String line : lines(file)) {
@@ -170,15 +188,30 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         }
     }
 
-    /** The theme, the themes it inherits (depth first, each once), then hicolor — the spec's fallback for every theme. */
-    private void loadThemes(final @NotNull String name) {
-        final List<Path> bases = iconBaseDirs();
+    /**
+     * The theme, the themes it inherits (depth first, each once), then hicolor — the spec's fallback for every theme.
+     * Only icon directories of the given contexts are indexed; null — all of them.
+     */
+    private static @NotNull List<Theme> loadThemes(
+        final @NotNull String name,
+        final @NotNull List<Path> bases,
+        final @Nullable Set<String> contexts
+    ) {
+        final List<Theme> result = new ArrayList<>();
         final Set<String> seen = new LinkedHashSet<>();
-        addTheme(name, bases, seen);
-        addTheme("hicolor", bases, seen);
+        addTheme(name, bases, contexts, seen, result);
+        addTheme("hicolor", bases, contexts, seen, result);
+
+        return result;
     }
 
-    private void addTheme(final @NotNull String name, final @NotNull List<Path> bases, final @NotNull Set<String> seen) {
+    private static void addTheme(
+        final @NotNull String name,
+        final @NotNull List<Path> bases,
+        final @Nullable Set<String> contexts,
+        final @NotNull Set<String> seen,
+        final @NotNull List<Theme> result
+    ) {
         if (!seen.add(name)) {
             return;
         }
@@ -198,10 +231,10 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         }
         final Map<String, Map<String, String>> ini = readIni(index);
         final Map<String, String> head = ini.getOrDefault("Icon Theme", Map.of());
-        themes.add(new Theme(roots, ini, head.getOrDefault("Directories", "")));
+        result.add(new Theme(roots, ini, head.getOrDefault("Directories", ""), contexts));
         for (final String parent : head.getOrDefault("Inherits", "").split(",")) {
             if (!parent.isBlank()) {
-                addTheme(parent.trim(), bases, seen);
+                addTheme(parent.trim(), bases, contexts, seen, result);
             }
         }
     }
@@ -224,23 +257,7 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         return result;
     }
 
-    /** $XDG_DATA_HOME, then $XDG_DATA_DIRS — in priority order. */
-    private static @NotNull List<Path> dataDirs() {
-        final Set<Path> result = new LinkedHashSet<>();
-        final String home = System.getProperty("user.home");
-        final String dataHome = System.getenv("XDG_DATA_HOME");
-        result.add(dataHome != null && !dataHome.isBlank() ? Path.of(dataHome) : Path.of(home, ".local", "share"));
-        final String dirs = System.getenv("XDG_DATA_DIRS");
-        for (final String d : (dirs != null && !dirs.isBlank() ? dirs : "/usr/local/share:/usr/share").split(":")) {
-            if (!d.isBlank()) {
-                result.add(Path.of(d));
-            }
-        }
-
-        return new ArrayList<>(result);
-    }
-
-    private @NotNull List<Path> iconBaseDirs() {
+    private static @NotNull List<Path> iconBaseDirs(final @NotNull List<Path> dataDirs) {
         final List<Path> result = new ArrayList<>();
         result.add(Path.of(System.getProperty("user.home"), ".icons"));
         for (final Path dir : dataDirs) {
@@ -299,7 +316,7 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         }
     }
 
-    /** One theme: its icon directories with the MimeTypes context; icon names in a directory are listed on first use. */
+    /** One theme: its icon directories of the wanted contexts; icon names in a directory are listed on first use. */
     private static final class Theme {
 
         private final List<Dir> dirs = new ArrayList<>();
@@ -307,11 +324,12 @@ final class FreedesktopIcons implements SystemIcons.Provider {
         private Theme(
             final @NotNull List<Path> roots,
             final @NotNull Map<String, Map<String, String>> ini,
-            final @NotNull String directories
+            final @NotNull String directories,
+            final @Nullable Set<String> contexts
         ) {
             for (final String d : directories.split(",")) {
                 final Map<String, String> props = ini.get(d.trim());
-                if (d.isBlank() || props == null || !ICON_CONTEXTS.contains(props.get("Context"))
+                if (d.isBlank() || props == null || contexts != null && !contexts.contains(props.get("Context"))
                     || parseInt(props.get("Scale"), 1) != 1) {
                     continue;
                 }

@@ -57,10 +57,13 @@ import org.jetbrains.annotations.NotNull;
 import tcm.apps.ConsoleWindow;
 import tcm.core.AppImageDesktopEntry;
 import tcm.core.WindowsMenuEntry;
+import tcm.core.XdgApps;
+import tcm.core.XdgMime;
 import tcm.core.ArchiveFormat;
 import tcm.core.DirWatcher;
 import tcm.core.EmbeddedArchives;
 import tcm.core.FileAttrs;
+import tcm.core.OpenWith;
 import tcm.core.PasswordCancelledException;
 import tcm.core.Passwords;
 import tcm.core.Progress;
@@ -365,6 +368,7 @@ public final class SmokeTest {
         checkUtils();
         checkPlatform(root);
         checkDesktopEntry(root);
+        checkOpenWith(root);
         checkWindowsMenuEntry(root);
         checkRenameSelection(root);
     }
@@ -430,6 +434,160 @@ public final class SmokeTest {
         env.remove("APPIMAGE");
         check(AppImageDesktopEntry.reconcile(env, home) == AppImageDesktopEntry.Status.NOT_APPIMAGE, "desktop entry: package run");
         check(!Files.exists(entry), "desktop entry: withdrawn for an installed package");
+    }
+
+    /** "Open with...": MIME lookup, the MIME Applications spec, desktop entries and Exec expansion against a fake XDG tree. */
+    private static void checkOpenWith(final @NotNull Path root) throws Exception {
+        final Path xdg = Files.createDirectories(root.resolve("xdg"));
+        final Path userData = xdg.resolve("data");
+        final Path sysData = xdg.resolve("sys data");
+        writeXdgTree(xdg, userData, sysData);
+        final Path tool = xdg.resolve("bin/real-tool");
+        final XdgApps apps = new XdgApps(List.of(xdg.resolve("config"), xdg.resolve("sysconfig")), List.of(userData, sysData),
+            List.of("XFCE"), name -> name.equals("present-tool") ? tool : null, "ru_RU.UTF-8");
+        final XdgMime mime = new XdgMime(List.of(userData, sysData));
+        checkXdgMime(xdg, mime);
+        checkXdgAssociations(apps, mime);
+        checkXdgEntries(apps, sysData);
+        checkXdgExec(apps, xdg);
+        final List<String> win = OpenWith.windowsDialogCommand("C:\\Program Files\\my docs\\a b.txt");
+        check(win.size() == 6 && String.join(" ", win.subList(2, win.size())).equals("C:\\Program Files\\my docs\\a b.txt")
+            && win.get(1).equals("shell32.dll,OpenAs_RunDLL"), "open with: windows dialog arguments " + win);
+        check(OpenWith.windowsDialogCommand("C:\\a  b.txt").equals(List.of("rundll32.exe", "shell32.dll,OpenAs_RunDLL", "C:\\a  b.txt")),
+            "open with: windows path with two spaces in one argument");
+    }
+
+    private static void writeXdgTree(final @NotNull Path xdg, final @NotNull Path userData, final @NotNull Path sysData) throws IOException {
+        writeFile(userData.resolve("mime/globs2"), "50:text/x-java:*.java\n50:application/x-foo:*.foo\n50:image/png:*.png\n");
+        writeFile(userData.resolve("mime/subclasses"), "text/x-java text/x-csrc\n");
+        writeFile(sysData.resolve("mime/aliases"), "application/x-foo-alias application/x-foo\n");
+        writeFile(xdg.resolve("config/xfce-mimeapps.list"), "[Added Associations]\ntext/plain=xfceonly.desktop;\n");
+        writeFile(xdg.resolve("config/kde-mimeapps.list"), "[Added Associations]\ntext/plain=kdeonly.desktop;\n");
+        writeFile(xdg.resolve("config/mimeapps.list"), "[Added Associations]\ntext/plain=added.desktop;\n"
+            + "x-scheme-handler/eclipse+command x-scheme-handler/eclipse+mpc=odd.desktop\nno equals sign\n"
+            + "[Removed Associations]\ntext/plain=removed.desktop;\n"
+            + "[Default Applications]\ntext/plain=missing.desktop;nodisp.desktop;\n");
+        writeFile(xdg.resolve("sysconfig/mimeapps.list"), "[Added Associations]\ntext/plain=removed.desktop;\n"
+            + "[Removed Associations]\ntext/plain=added.desktop;\n");
+        writeFile(userData.resolve("applications/mimeinfo.cache"), "[MIME Cache]\ntext/plain=user.desktop;\n");
+        writeFile(sysData.resolve("applications/mimeinfo.cache"), "[MIME Cache]\n"
+            + "text/plain=sysed.desktop;removed.desktop;nodisp.desktop;hidden.desktop;tryexec-missing.desktop;tryexec-ok.desktop;"
+            + "onlykde.desktop;shadowed.desktop;vendor-app.desktop;\ntext/x-java=javaide.desktop;\n"
+            + "image/png=viewer.desktop;paint.desktop\napplication/x-foo-alias=fooer.desktop;\n");
+        writeFile(sysData.resolve("applications/defaults.list"), "[Default Applications]\ntext/x-java=sysed.desktop\n");
+        final Path userApps = userData.resolve("applications");
+        final Path sysApps = sysData.resolve("applications");
+        for (final String id : List.of("xfceonly", "kdeonly", "added", "removed", "user", "sysed", "javaide", "viewer", "paint", "fooer")) {
+            writeFile((id.equals("user") ? userApps : sysApps).resolve(id + ".desktop"), entry(id, "Exec=" + id + " %f\n"));
+        }
+        writeFile(sysApps.resolve("nodisp.desktop"), entry("nodisp", "Exec=nodisp %U\nNoDisplay=true\n"));
+        writeFile(sysApps.resolve("hidden.desktop"), entry("hidden", "Exec=hidden\nHidden=true\n"));
+        writeFile(sysApps.resolve("tryexec-missing.desktop"), entry("tm", "Exec=tm\nTryExec=absent-tool\n"));
+        writeFile(sysApps.resolve("tryexec-ok.desktop"), entry("tok", "Exec=tok\nTryExec=present-tool\n"));
+        writeFile(sysApps.resolve("onlykde.desktop"), entry("onlykde", "Exec=okde\nOnlyShowIn=KDE;\n"));
+        writeFile(sysApps.resolve("shadowed.desktop"), entry("shadowed", "Exec=shadowed\n"));
+        writeFile(userApps.resolve("shadowed.desktop"), "[Desktop Entry]\nHidden=true\n");
+        writeFile(sysApps.resolve("vendor/app.desktop"), entry("vendor", "Exec=vendor\n"));
+        writeFile(sysApps.resolve("link.desktop"), "[Desktop Entry]\nType=Link\nName=Link\nURL=https://example.com\n");
+    }
+
+    private static @NotNull String entry(final @NotNull String name, final @NotNull String keys) {
+        return "# comment\n[Desktop Entry]\nType=Application\nName=" + name + "\n" + keys + "[Desktop Action new]\nName=Other\nExec=other\n";
+    }
+
+    private static void writeFile(final @NotNull Path file, final @NotNull String text) throws IOException {
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, text);
+    }
+
+    private static void checkXdgMime(final @NotNull Path xdg, final @NotNull XdgMime mime) throws IOException {
+        check(mime.withParents("text/x-java").equals(List.of("text/x-java", "text/x-csrc", "text/plain")), "xdg mime: subclass chain "
+            + mime.withParents("text/x-java"));
+        check(mime.withParents("image/png").equals(List.of("image/png")), "xdg mime: no octet-stream fallback");
+        check(mime.canonical("application/x-foo-alias").equals("application/x-foo"), "xdg mime: alias");
+        check(mime.typeOf(xdg).equals(XdgMime.DIRECTORY), "xdg mime: directory");
+        final Path readme = xdg.resolve("README");
+        Files.writeString(readme, "plain text\n");
+        final Path blob = xdg.resolve("blob");
+        Files.write(blob, new byte[] {1, 2, 0, 4});
+        check(mime.typeOf(readme).equals(XdgMime.TEXT) && mime.typeOf(blob).equals(XdgMime.BINARY), "xdg mime: content sniffing");
+        check(mime.typeOf(xdg.resolve("Main.JAVA")).equals("text/x-java"), "xdg mime: by extension, case-insensitive");
+    }
+
+    private static void checkXdgAssociations(final @NotNull XdgApps apps, final @NotNull XdgMime mime) {
+        final List<String> text = ids(apps.entriesFor(mime.withParents("text/plain")));
+        check(text.equals(List.of("nodisp.desktop", "xfceonly.desktop", "added.desktop", "user.desktop", "sysed.desktop",
+            "tryexec-ok.desktop", "vendor-app.desktop")), "xdg apps: precedence, removal, NoDisplay default, filters " + text);
+        check(apps.entriesFor(mime.withParents("text/plain")).get(0).isDefaultApp()
+            && !apps.entriesFor(mime.withParents("text/plain")).get(1).isDefaultApp(), "xdg apps: default flagged");
+        final List<String> java = ids(apps.entriesFor(mime.withParents("text/x-java")));
+        check(java.equals(List.of("sysed.desktop", "javaide.desktop", "xfceonly.desktop", "added.desktop", "user.desktop",
+            "tryexec-ok.desktop", "vendor-app.desktop")), "xdg apps: legacy default, exact type before parent " + java);
+        final List<XdgApps.Associated> png = apps.entriesFor(mime.withParents("image/png"));
+        check(ids(png).equals(List.of("viewer.desktop", "paint.desktop")) && png.get(0).isDefaultApp(), "xdg apps: first is default "
+            + ids(png));
+        check(ids(apps.entriesFor(mime.withParents("application/x-foo"))).equals(List.of("fooer.desktop")), "xdg apps: alias key");
+        check(apps.entriesFor(List.of("application/x-none")).isEmpty(), "xdg apps: no associations");
+    }
+
+    private static void checkXdgEntries(final @NotNull XdgApps apps, final @NotNull Path sysData) throws IOException {
+        final List<String> all = apps.all().stream()
+            .map(OpenWith.App::getId)
+            .toList();
+        check(all.contains("vendor-app.desktop") && all.contains("tryexec-ok.desktop") && !all.contains("nodisp.desktop")
+            && !all.contains("hidden.desktop") && !all.contains("shadowed.desktop") && !all.contains("onlykde.desktop")
+            && !all.contains("tryexec-missing.desktop") && !all.contains("link.desktop") && all.size() == 12, "xdg apps: all " + all);
+        writeFile(sysData.resolve("applications/names.desktop"), "[Desktop Entry]\nType=Application\nExec=n\nName=Editor\\sOne\n"
+            + "Name[ru]=Редактор\nName[ru_RU]=Редактор RU\n");
+        writeFile(sysData.resolve("applications/names2.desktop"), "[Desktop Entry]\nType=Application\nExec=n\nName=Editor\n"
+            + "Name[ru]=Редактор\nName[de]=Bearbeiter\n");
+        check(apps.entry("names.desktop").getName().equals("Редактор RU") && apps.entry("names2.desktop").getName().equals("Редактор")
+            && apps.entry("sysed.desktop").getName().equals("sysed"), "xdg apps: localized names");
+        final XdgApps english = new XdgApps(List.of(), List.of(sysData), List.of(), name -> null, "C");
+        check(english.entry("names.desktop").getName().equals("Editor One"), "xdg apps: unlocalized name, \\s escape");
+        check(apps.entry("vendor-app.desktop").getFile().endsWith(Path.of("vendor/app.desktop")), "xdg apps: id dash to subdirectory");
+        check(!apps.isLaunchable(apps.entry("shadowed.desktop")), "xdg apps: Hidden tombstone shadows lower directory");
+        check(apps.all().stream().map(OpenWith.App::getName).toList().indexOf("Редактор RU") > 0, "xdg apps: all sorted by name");
+    }
+
+    private static void checkXdgExec(final @NotNull XdgApps apps, final @NotNull Path xdg) throws Exception {
+        final Path dir = Files.createDirectories(xdg.resolve("my docs"));
+        final Path file = dir.resolve("отчёт 1.txt");
+        Files.writeString(file, "text");
+        final Path apps2 = xdg.resolve("data/applications");
+        writeFile(apps2.resolve("exec1.desktop"), "[Desktop Entry]\nType=Application\nName=Tool\nIcon=tool-icon\n"
+            + "Exec=/opt/x/tool --title \"%c\" \"say \\\"hi\\\" for \\\\$5\" %F --uri=%u %i %k 100%% %d \"\"\n");
+        final List<String> cmd = apps.command(apps.entry("exec1.desktop"), file);
+        final String uri = file.toUri().toString();
+        check(cmd.equals(List.of("/opt/x/tool", "--title", "Tool", "say \"hi\" for $5", file.toString(), "--uri=" + uri, "--icon",
+            "tool-icon", apps2.resolve("exec1.desktop").toString(), "100%", "")), "xdg exec: quotes and field codes " + cmd);
+        check(uri.startsWith("file:///") && !uri.contains(" ") && uri.contains("%D0%BE"), "xdg exec: %u percent-encoded " + uri);
+        writeFile(apps2.resolve("exec2.desktop"), "[Desktop Entry]\nType=Application\nName=V\nExec=viewer -x %i\n");
+        check(apps.command(apps.entry("exec2.desktop"), file).equals(List.of("viewer", "-x", file.toString())),
+            "xdg exec: no file code appends the file, %i without Icon dropped");
+        writeFile(apps2.resolve("exec3.desktop"), "[Desktop Entry]\nType=Application\nName=U\nExec=app --open=%%f %U\n");
+        check(apps.command(apps.entry("exec3.desktop"), file).equals(List.of("app", "--open=%f", uri)), "xdg exec: %U, literal %%f");
+        if (!POSIX) {
+            return;
+        }
+        final Path marker = xdg.resolve("marker.txt");
+        final Path script = xdg.resolve("bin/marker.sh");
+        writeFile(script, "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"" + marker + ".tmp\"\npwd >> \"" + marker
+            + ".tmp\"\nmv \"" + marker + ".tmp\" \"" + marker + "\"\n");
+        Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwxr-xr-x"));
+        writeFile(apps2.resolve("marker.desktop"), "[Desktop Entry]\nType=Application\nName=M\nExec=\"" + script + "\" --flag %F\n");
+        apps.launch(new OpenWith.App("marker.desktop", "M", null, false), file);
+        for (int i = 0; i < 100 && !Files.exists(marker); i++) {
+            Thread.sleep(50);
+        }
+        check(Files.exists(marker) && Files.readAllLines(marker).equals(List.of("--flag", file.toString(), dir.toString())),
+            "xdg exec: launched with arguments and working directory");
+    }
+
+    private static @NotNull List<String> ids(final @NotNull List<XdgApps.Associated> list) {
+        return list.stream()
+            .map(a -> a.getEntry().getId())
+            .toList();
     }
 
     private static void checkWindowsMenuEntry(final @NotNull Path root) throws Exception {
@@ -1393,6 +1551,16 @@ public final class SmokeTest {
         final BufferedImage thumb = SvgImages.thumbnail(svg, 40);
         check(thumb != null && thumb.getWidth() == 40 && thumb.getHeight() == 27, "svg thumbnail");
         check(SvgImages.isSvg("A.SVG") && SvgImages.isSvg("b.svgz") && !SvgImages.isSvg("c.svg.txt"), "svg names");
+        // filters go through ConvolveOp/LookupOp and the medialib native code: in the native image they need JNI metadata
+        final BufferedImage blur = SvgImages.render(("<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>"
+            + "<filter id='b' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='6'/></filter>"
+            + "<filter id='s'><feGaussianBlur stdDeviation='3' edgeMode='duplicate'/>"
+            + "<feComponentTransfer><feFuncA type='table' tableValues='0 0.5'/></feComponentTransfer></filter>"
+            + "<rect x='30' y='30' width='40' height='40' fill='black' filter='url(#b)'/>"
+            + "<rect x='0' y='0' width='10' height='10' fill='black' filter='url(#s)'/></svg>").getBytes(StandardCharsets.UTF_8));
+        final int fringe = blur == null ? -1 : blur.getRGB(30, 50) >>> 24;
+        check(fringe > 0 && fringe < 255 && (blur.getRGB(50, 50) >>> 24) > 200 && (blur.getRGB(95, 5) >>> 24) == 0,
+            "svg feGaussianBlur renders, fringe alpha " + fringe);
     }
 
     /** ICO with a 32-bit DIB and ICNS with an RLE-packed RGB element plus its mask decode into ARGB images. */

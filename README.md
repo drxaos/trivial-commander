@@ -196,6 +196,10 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   - clicking the `F8 Delete` button with `Shift` — delete bypassing the trash;
 - **Change attributes** (file context menu, Files menu): rwx permissions for owner/group/others (DOS attributes on Windows),
   modification date, processing directory contents. An untouched checkbox does not change the attribute; a gray one means the selected files have different values.
+- **Open with...** (file context menu, next to Open with system / `Alt+F3`): pick the program for the file under the cursor (a file
+  in an archive is unpacked to a temporary directory first). On Linux a list of the applications registered for its type (the
+  default first, "All applications" for the rest; read from the freedesktop MIME and desktop entry files), on macOS the same from
+  Launch Services; on Windows the system "Open with" dialog. `Enter` or double click opens, typing jumps to a name, `Esc` cancels.
 - The **Terminal** toolbar button opens a terminal in the active panel's directory.
   - left-button drag to the other panel (or onto a directory) opens the copy dialog; the directory where the files will land
     is outlined with a frame; while the right button is pressed during the drag — move, released — copy again;

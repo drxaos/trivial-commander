@@ -177,6 +177,29 @@ public final class SystemIcons {
     }
 
     /**
+     * The SIZE x SIZE icon of an application for the "Open with" list: on macOS the bundle path, elsewhere a desktop entry's Icon
+     * value (a file or a theme icon name). Null when there is none. Reads files and may call the platform: not on the EDT.
+     */
+    public static @Nullable Icon appIcon(final @NotNull String icon) {
+        final String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (os.contains("win")) {
+            return null;
+        }
+        try {
+            if (!os.contains("mac")) {
+                return FreedesktopIcons.appIcon(icon, SIZE);
+            }
+            final Image img = MacProvider.imageOf(new File(icon));
+
+            return img == null ? null : fromPlatform(new ImageIcon(img));
+        } catch (final Throwable e) {
+            // a broken image file, an SVG the renderer fails on, no access to the JDK's AppKit bridge: the row has no icon,
+            // and the icons after it still load
+            return null;
+        }
+    }
+
+    /**
      * The image as TYPE_INT_ARGB centered on a SIZE x SIZE canvas: the name text in the table starts at the same offset in every row.
      * Pixels are copied through getRGB, not drawn: theme PNGs come in custom image types, and a native image has no Java2D loops
      * for drawing them (ClassNotFoundException: sun.java2d.loops.OpaqueCopyAnyToArgb).
@@ -305,11 +328,9 @@ public final class SystemIcons {
      */
     private static final class MacProvider implements Provider {
 
-        private final Method createImageOfFile;
         private final Samples samples = new Samples();
 
         private MacProvider() throws Exception {
-            createImageOfFile = Class.forName("sun.lwawt.macosx.CImage").getMethod("createImageOfFile", String.class, int.class, int.class);
             final File probe = samples.of(".txt");
             if (probe == null || imageOf(probe) == null) {
                 throw new IllegalStateException("no Launch Services icons");
@@ -332,7 +353,11 @@ public final class SystemIcons {
             return img == null ? null : fromPlatform(new ImageIcon(img));
         }
 
-        private @Nullable Image imageOf(final @NotNull File f) throws Exception {
+        /** Any file or bundle: an .app gives the application's icon. */
+        private static @Nullable Image imageOf(final @NotNull File f) throws Exception {
+            final Method createImageOfFile = Class.forName("sun.lwawt.macosx.CImage")
+                .getMethod("createImageOfFile", String.class, int.class, int.class);
+
             return (Image) createImageOfFile.invoke(null, f.getAbsolutePath(), SIZE, SIZE);
         }
     }

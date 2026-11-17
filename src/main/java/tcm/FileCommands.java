@@ -25,6 +25,7 @@ import tcm.apps.EditorWindow;
 import tcm.apps.ViewerWindow;
 import tcm.core.ArchiveIndex;
 import tcm.core.AttribChange;
+import tcm.core.OpenWith;
 import tcm.core.Progress;
 import tcm.core.VFile;
 import tcm.core.Vfs;
@@ -45,6 +46,7 @@ import tcm.ui.PanelTab;
 import tcm.ui.dialogs.AttribDialog;
 import tcm.ui.dialogs.Dialogs;
 import tcm.ui.dialogs.MultiRenameDialog;
+import tcm.ui.dialogs.OpenWithDialog;
 import tcm.ui.dialogs.PackDialog;
 import tcm.ui.dialogs.PropertiesDialog;
 import tcm.ui.dialogs.SearchDialog;
@@ -717,6 +719,41 @@ public final class FileCommands {
             launch(localCopy(f));
         } catch (final IOException | RuntimeException e) {
             Dialogs.error(frame, "Cannot open " + f.getName(), e);
+        }
+    }
+
+    /**
+     * "Open with...": the user picks the application for the file under the cursor. Windows shows its own dialog, which starts
+     * the chosen app itself and is meant for files only; elsewhere our list ({@link OpenWithDialog}) and then the launch.
+     */
+    public void openWith() {
+        final VFile f = active().getCursorFile();
+        final OpenWith openWith = OpenWith.forPlatform();
+        // a directory inside an archive has no single file to hand over
+        if (f == null || f.isParentLink() || f.isDirectory() && (openWith == null || !f.isLocal())) {
+            return;
+        }
+        final Path p;
+        try {
+            p = localCopy(f);
+            if (openWith == null) {
+                OpenWith.showWindowsDialog(p);
+
+                return;
+            }
+        } catch (final IOException | RuntimeException e) {
+            Dialogs.error(frame, "Cannot open " + f.getName(), e);
+
+            return;
+        }
+        final OpenWith.App app = OpenWithDialog.choose(frame, openWith, p);
+        if (app == null) {
+            return;
+        }
+        try {
+            openWith.launch(app, p);
+        } catch (final IOException | RuntimeException e) {
+            Dialogs.error(frame, "Cannot start " + app.getName() + " for " + f.getName(), e);
         }
     }
 
