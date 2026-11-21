@@ -253,6 +253,9 @@ public final class SmokeTest {
 
     public static void main(final String[] args) throws Exception {
         System.setProperty("java.awt.headless", "true");
+        // the Swing checks run under the program's look and feel: a native image has reflection metadata for FlatLaf UIs only
+        Main.initNativeImage();
+        Main.applyTheme("Light");
         final Path root = Files.createTempDirectory("tcm-smoke");
         try {
             run(root);
@@ -667,7 +670,7 @@ public final class SmokeTest {
         writeFile(apps2.resolve("exec1.desktop"), "[Desktop Entry]\nType=Application\nName=Tool\nIcon=tool-icon\n"
             + "Exec=/opt/x/tool --title \"%c\" \"say \\\"hi\\\" for \\\\$5\" %F --uri=%u %i %k 100%% %d \"\"\n");
         final List<String> cmd = apps.command(apps.entry("exec1.desktop"), file);
-        final String uri = file.toUri().toString();
+        final String uri = file.toUri().toASCIIString();
         check(cmd.equals(List.of("/opt/x/tool", "--title", "Tool", "say \"hi\" for $5", file.toString(), "--uri=" + uri, "--icon",
             "tool-icon", apps2.resolve("exec1.desktop").toString(), "100%", "")), "xdg exec: quotes and field codes " + cmd);
         check(uri.startsWith("file:///") && !uri.contains(" ") && uri.contains("%D0%BE"), "xdg exec: %u percent-encoded " + uri);
@@ -710,8 +713,10 @@ public final class SmokeTest {
 
         final Path shortcut = winDir.resolve(WindowsMenuEntry.SHORTCUT_FILE_NAME);
 
-        // In test mode on non-native environment, zero-arg reconcile() returns NOT_WINDOWS_NATIVE
-        check(WindowsMenuEntry.reconcile() == WindowsMenuEntry.Status.NOT_WINDOWS_NATIVE, "windows menu: jvm mode");
+        // under a JVM the zero-arg reconcile() does nothing; a native smoke test must not point the user's real shortcut at itself
+        if (!WindowsMenuEntry.isWindowsNative()) {
+            check(WindowsMenuEntry.reconcile() == WindowsMenuEntry.Status.NOT_WINDOWS_NATIVE, "windows menu: jvm mode");
+        }
 
         if (!POSIX) {
             // First launch: creates shortcut

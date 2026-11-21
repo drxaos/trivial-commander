@@ -169,7 +169,7 @@ public final class XdgApps implements OpenWith {
      */
     public @NotNull List<String> command(final @NotNull DesktopEntry entry, final @NotNull Path file) {
         final String path = file.toAbsolutePath().toString();
-        final String uri = file.toAbsolutePath().toUri().toString();
+        final String uri = file.toAbsolutePath().toUri().toASCIIString();
         final List<String> result = new ArrayList<>();
         boolean hasFileCode = false;
         for (final String arg : splitExec(entry.getExec() == null ? "" : entry.getExec())) {

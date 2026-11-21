@@ -54,7 +54,7 @@ public final class Main {
      * otherwise a temporary directory with an empty lib. Windows has no system fontconfig at all: there the distribution
      * carries lib/fontconfig.bfc next to tcm.exe.
      */
-    private static void initNativeImage() {
+    static void initNativeImage() {
         if (System.getProperty("java.home") != null) {
             return;
         }
