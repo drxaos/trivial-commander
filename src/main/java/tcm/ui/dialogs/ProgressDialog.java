@@ -22,7 +22,7 @@ import tcm.util.Placement;
 import tcm.util.TextUtil;
 
 /**
- * Modeless operation progress: current file, total amount, Pause / Background / Cancel.
+ * Modeless operation progress: current file, total amount, Pause / Background (to {@link BackgroundDialog}) / Cancel.
  */
 public final class ProgressDialog extends JDialog {
 
@@ -39,7 +39,13 @@ public final class ProgressDialog extends JDialog {
     private boolean background;
     private boolean finished;
 
-    public ProgressDialog(final @NotNull Window owner, final @NotNull String title, final @NotNull JobContext ctx) {
+    /** onBackground — the job leaves this dialog for the list of background operations. */
+    public ProgressDialog(
+        final @NotNull Window owner,
+        final @NotNull String title,
+        final @NotNull JobContext ctx,
+        final @NotNull Runnable onBackground
+    ) {
         super(owner, title, ModalityType.MODELESS);
         this.ctx = ctx;
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
@@ -61,6 +67,7 @@ public final class ProgressDialog extends JDialog {
         buttons.add(Dialogs.button("Background", () -> {
             background = true;
             setVisible(false);
+            onBackground.run();
         }));
         buttons.add(Dialogs.button("Cancel", ctx::cancel));
         getContentPane().add(info, BorderLayout.CENTER);

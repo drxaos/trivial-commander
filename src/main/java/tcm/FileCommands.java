@@ -385,27 +385,50 @@ public final class FileCommands {
             }
         }
         if (!inArchive && archives.isEmpty()) {
+            // no archive by its name: the files are searched for one inside (an installer .exe, a .run), as Ctrl+PgDn does
+            for (final VFile f : sel) {
+                if (f.isLocal() && !f.isDirectory() && !f.isParentLink()) {
+                    archives.add(f);
+                }
+            }
+        }
+        if (!inArchive && archives.isEmpty()) {
             JOptionPane.showMessageDialog(frame, "No archives selected.", "Unpack", JOptionPane.INFORMATION_MESSAGE);
 
             return;
         }
         final String what = inArchive ? describe(sel) : archives.size() + " archive(s)";
         final TargetDialog.Result r = TargetDialog.show(frame, "Unpack files", "Unpack " + what + " to:", dirLocation(other().getDir()),
-            frame.getFavorites());
+            frame.getFavorites(), inArchive || archives.size() == 1 ? "Unpack into a directory named after the archive"
+                : "Unpack each archive into a directory named after it");
         if (r == null) {
             return;
         }
         try {
-            final Target t = resolveTarget(r.getTarget(), tab.getDir(), Integer.MAX_VALUE);
             if (inArchive) {
+                final String target = r.isOwnDirs() ? ownDirTarget(r.getTarget(), tab.getDir()) : r.getTarget();
+                final Target t = resolveTarget(target, tab.getDir(), Integer.MAX_VALUE);
                 final List<VFile> src = sel.isEmpty() ? Vfs.list(tab.getDir()) : sel;
                 run(new CopyJob(src, t.dir, null, r.getMask(), false), r.isQueued());
             } else {
-                run(new UnpackJob(archives, t.dir, r.getMask()), r.isQueued());
+                final Target t = resolveTarget(r.getTarget(), tab.getDir(), Integer.MAX_VALUE);
+                run(new UnpackJob(archives, t.dir, r.getMask(), r.isOwnDirs()), r.isQueued());
             }
         } catch (final IOException e) {
             Dialogs.error(frame, "Invalid target: " + r.getTarget(), e);
         }
+    }
+
+    /** Unpacking from an open archive into a directory named after it: target/name/ (the name the user sees, not a temporary copy). */
+    private static @NotNull String ownDirTarget(final @NotNull String target, final @NotNull VFile dir) {
+        final String location = Vfs.displayLocation(dir);
+        // a nested archive: the innermost one, the last before the entry path
+        final String archive = location.endsWith(dir.getEntry())
+            ? location.substring(0, location.length() - dir.getEntry().length()).replaceAll("(!/|/)+$", "")
+            : dir.getHostPath().toString();
+        final String name = archive.substring(Math.max(archive.lastIndexOf('/'), archive.lastIndexOf('\\')) + 1);
+
+        return target.replaceAll("[/\\\\]+$", "") + "/" + UnpackJob.dirName(name) + "/";
     }
 
     /** Alt+Shift+F9 / Alt+Shift+F6: test archives. */
@@ -461,8 +484,8 @@ public final class FileCommands {
             }
 
             @Override
-            public void view(final @NotNull List<VFile> files, final int index) {
-                FileCommands.this.view(files, index);
+            public void view(final @NotNull List<VFile> files, final int index, final @Nullable String find, final boolean caseSensitive) {
+                ViewerWindow.open(frame, files, index, FileCommands.this::edit, find, caseSensitive);
             }
 
             @Override

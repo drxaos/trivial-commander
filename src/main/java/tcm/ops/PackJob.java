@@ -25,6 +25,9 @@ import tcm.core.ZipOps;
  */
 public final class PackJob extends Job {
 
+    /** An archive with no entries: only the end of central directory record. */
+    private static final int EMPTY_ZIP = 22;
+
     private final @NotNull List<VFile> sources;
     private final @NotNull Path archive;
     private final boolean recursive;
@@ -51,11 +54,20 @@ public final class PackJob extends Job {
 
             return;
         }
-        if (!Files.exists(archive)) {
+        final boolean created = !Files.exists(archive);
+        if (created) {
             Vfs.checkWritable(archive);
             createEmpty(archive);
         }
-        new CopyJob(sources, Vfs.archiveDir(archive, ""), null, "*", move, recursive).run(ctx);
+        try {
+            new CopyJob(sources, Vfs.archiveDir(archive, ""), null, "*", move, recursive).run(ctx);
+        } finally {
+            // cancelled or failed before anything was written: no empty archive is left behind
+            if (created && Files.exists(archive) && Files.size(archive) <= EMPTY_ZIP) {
+                Files.deleteIfExists(archive);
+                Vfs.invalidate(archive);
+            }
+        }
     }
 
     private void packTar(final @NotNull ArchiveFormat format, final @NotNull JobContext ctx) throws IOException {

@@ -24,6 +24,7 @@ public final class JobContext implements Progress {
     private volatile @NotNull String current = "";
     private volatile boolean paused;
     private volatile boolean cancelled;
+    private volatile boolean finished;
     private volatile @Nullable Decision sticky;
 
     public JobContext(final @NotNull ConflictResolver resolver) {
@@ -110,6 +111,15 @@ public final class JobContext implements Progress {
             cancelled = true;
             lock.notifyAll();
         }
+    }
+
+    /** The job has returned (done, failed or cancelled). */
+    public void setFinished() {
+        finished = true;
+    }
+
+    public boolean isFinished() {
+        return finished;
     }
 
     public boolean isPaused() {

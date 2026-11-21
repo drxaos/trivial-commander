@@ -67,7 +67,8 @@ public final class SearchDialog extends JDialog {
 
         void feedToPanel(@NotNull List<VFile> files);
 
-        void view(@NotNull List<VFile> files, int index);
+        /** find — the text the files were searched for (F3 in the viewer finds it), null — searched by name only. */
+        void view(@NotNull List<VFile> files, int index, @Nullable String find, boolean caseSensitive);
 
         void edit(@NotNull VFile file);
     }
@@ -113,6 +114,9 @@ public final class SearchDialog extends JDialog {
     private volatile boolean cancelled;
     private volatile @NotNull String currentDir = "";
     private @Nullable Thread worker;
+    /** Plain text of the last search, for F3 in the viewer; null — by name, RegEx or "NOT containing". */
+    private @Nullable String foundText;
+    private boolean foundCaseSensitive;
 
     public SearchDialog(final @NotNull Window owner, final @NotNull Host host, final @NotNull String startDir) {
         super(owner, "Find Files", ModalityType.MODELESS);
@@ -173,6 +177,7 @@ public final class SearchDialog extends JDialog {
         textOpts.add(notContaining);
         addRow(p, c, 4, new JLabel(""), textOpts);
         addRow(p, c, 5, new JLabel(""), inResults);
+        Dialogs.focusOnCheck(findText, text);
         text.getDocument().addDocumentListener(new DocumentListener() {
             @Override
             public void insertUpdate(final DocumentEvent e) {
@@ -201,6 +206,10 @@ public final class SearchDialog extends JDialog {
         p.add(row(newerOn, newerDays));
         p.add(row(olderOn, olderDays));
         p.add(row(new JLabel("Find:"), kind));
+        Dialogs.focusOnCheck(minSizeOn, minSize);
+        Dialogs.focusOnCheck(maxSizeOn, maxSize);
+        Dialogs.focusOnCheck(newerOn, newerDays);
+        Dialogs.focusOnCheck(olderOn, olderDays);
 
         return p;
     }
@@ -323,6 +332,8 @@ public final class SearchDialog extends JDialog {
         }
         pushHistory();
         results.clear();
+        foundText = !criteria.getText().isEmpty() && !criteria.isTextRegex() && !criteria.isNotContaining() ? criteria.getText() : null;
+        foundCaseSensitive = criteria.isCaseSensitive();
         cancelled = false;
         start.setText("Stop");
         flush.start();
@@ -482,7 +493,7 @@ public final class SearchDialog extends JDialog {
             }
         }
         if (!files.isEmpty()) {
-            host.view(files, start);
+            host.view(files, start, foundText, foundCaseSensitive);
         }
     }
 

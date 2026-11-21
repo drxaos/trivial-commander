@@ -338,7 +338,7 @@ public final class SmokeTest {
 
         // unpacking
         final Path unpacked = Files.createDirectories(root.resolve("unpacked"));
-        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(unpacked.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(unpacked.toString()), "*", false));
         check(Files.readString(unpacked.resolve("renamed/deep/c.txt")).equals("deep file"), "unpack");
 
         // jar as a directory
@@ -371,6 +371,115 @@ public final class SmokeTest {
         checkOpenWith(root);
         checkWindowsMenuEntry(root);
         checkRenameSelection(root);
+        checkUnpackOwnDirs(root);
+        checkRenameReplace(root);
+        checkNsisInstaller();
+        checkNsisMakensis(root);
+    }
+
+    /** Unpacking each archive into a directory named after it. */
+    private static void checkUnpackOwnDirs(final @NotNull Path root) throws Exception {
+        check(UnpackJob.dirName("a.zip").equals("a"), "own dir: a.zip");
+        check(UnpackJob.dirName("a.b.tar.gz").equals("a.b"), "own dir: tar.gz drops both extensions");
+        check(UnpackJob.dirName("README").equals("README.d"), "own dir: no extension");
+        final Path src = Files.createDirectories(root.resolve("own-src"));
+        Files.writeString(src.resolve("x.txt"), "x");
+        final Path one = root.resolve("one.zip");
+        final Path two = root.resolve("two.zip");
+        exec(new PackJob(List.of(Vfs.stat(src.resolve("x.txt"))), one, true, false));
+        exec(new PackJob(List.of(Vfs.stat(src.resolve("x.txt"))), two, true, false));
+        final Path into = Files.createDirectories(root.resolve("own-into"));
+        exec(new UnpackJob(List.of(Vfs.stat(one), Vfs.stat(two)), Vfs.resolve(into.toString()), "*", true));
+        check(Files.readString(into.resolve("one/x.txt")).equals("x") && Files.readString(into.resolve("two/x.txt")).equals("x"),
+            "unpack into own dirs");
+        check(!Files.exists(into.resolve("x.txt")), "own dirs: nothing at the target root");
+    }
+
+    /** Renaming an archive entry onto an existing name with replace keeps only the renamed one. */
+    private static void checkRenameReplace(final @NotNull Path root) throws Exception {
+        final Path src = Files.createDirectories(root.resolve("ren-src"));
+        Files.writeString(src.resolve("a.txt"), "A");
+        Files.writeString(src.resolve("b.txt"), "B");
+        final Path zip = root.resolve("ren.zip");
+        exec(new PackJob(List.of(Vfs.stat(src.resolve("a.txt")), Vfs.stat(src.resolve("b.txt"))), zip, true, false));
+        ZipOps.rename(zip, "a.txt", "b.txt", true);
+        check(names(zipRoot(zip)).equals(List.of("b.txt")), "rename replace: one entry left: " + names(zipRoot(zip)));
+        check(new String(Vfs.readAll(Vfs.findChild(zipRoot(zip), "b.txt")), StandardCharsets.UTF_8).equals("A"),
+            "rename replace: the renamed content wins");
+    }
+
+    /** A real NSIS 3 Unicode solid LZMA installer, when present (ar/ is not in the repository). */
+    private static void checkNsisInstaller() throws Exception {
+        final Path exe = Path.of("ar/u-center_v26.10_installer.exe");
+        if (!Files.isRegularFile(exe)) {
+            System.out.println("  --  NSIS sample not found, skipped");
+
+            return;
+        }
+        final Path cut = Vfs.openEmbedded(Vfs.stat(exe), Progress.NONE);
+        check(cut != null, "NSIS installer opens");
+        final VFile rootDir = Vfs.archiveDir(cut, "");
+        check(Vfs.findChild(rootDir, "u-center.exe") != null && Vfs.findChild(rootDir, "$PLUGINSDIR") != null, "NSIS names");
+        final VFile flash = Vfs.findChild(rootDir, "flash.txt");
+        check(flash != null && flash.getSize() == 9873 && Vfs.readAll(flash).length == 9873, "NSIS entry size and content");
+        check(Vfs.findChild(Vfs.archiveDir(cut, "$TEMP/ubxusb"), "ubloxGnss_usbcdc_windows_64_v18.08.exe") != null,
+            "NSIS file outside $INSTDIR");
+        Vfs.releaseNested(cut);
+    }
+
+    /** Installers built by makensis (when installed): every compression, solid or not, Unicode or ANSI, File /r subdirectories. */
+    private static void checkNsisMakensis(final @NotNull Path root) throws Exception {
+        final Path dir = Files.createDirectories(root.resolve("nsis"));
+        final Path data = Files.createDirectories(dir.resolve("in/sub/deep"));
+        final byte[] big = new byte[1_500_000];
+        new Random(7).nextBytes(big);
+        Files.write(dir.resolve("in/big.bin"), big);
+        Files.writeString(dir.resolve("in/sub/a.txt"), "a".repeat(10_000));
+        Files.writeString(data.resolve("b.txt"), "b");
+        for (final String compressor : List.of("zlib", "bzip2", "lzma")) {
+            for (final String solid : List.of("", "/SOLID ")) {
+                for (final String unicode : List.of("true", "false")) {
+                    final String name = compressor + (solid.isEmpty() ? "" : "-solid") + "-" + unicode;
+                    final Path exe = dir.resolve(name + ".exe");
+                    final Path script = dir.resolve(name + ".nsi");
+                    Files.writeString(script, String.join("\n", "Unicode " + unicode, "SetCompressor " + solid + compressor,
+                        "OutFile \"" + exe + "\"", "InstallDir \"$TEMP\\t\"", "RequestExecutionLevel user", "Section",
+                        "SetOutPath \"$INSTDIR\"", "File \"" + dir.resolve("in/big.bin") + "\"", "SetOutPath \"$INSTDIR\\s\"",
+                        "File /r \"" + dir.resolve("in/sub") + "/*\"", "SetOutPath \"$SYSDIR\"", "File /oname=c.txt \""
+                            + data.resolve("b.txt") + "\"", "SectionEnd", ""));
+                    final Process p;
+                    try {
+                        p = new ProcessBuilder("makensis", "-V1", script.toString()).redirectErrorStream(true).start();
+                    } catch (final IOException e) {
+                        System.out.println("  --  makensis not found, NSIS builds skipped");
+
+                        return;
+                    }
+                    final String log = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    check(p.waitFor() == 0, "makensis " + name + ": " + log);
+                    checkNsisBuilt(exe, name, big);
+                }
+            }
+        }
+        // Alt+F9 on an installer: the archive inside is found and unpacked, the temporary copy is released
+        final Path into = Files.createDirectories(dir.resolve("unpacked"));
+        exec(new UnpackJob(List.of(Vfs.stat(dir.resolve("lzma-solid-true.exe"))), Vfs.resolve(into.toString()), "*", true));
+        check(Arrays.equals(Files.readAllBytes(into.resolve("lzma-solid-true/big.bin")), big)
+            && Files.readString(into.resolve("lzma-solid-true/s/deep/b.txt")).equals("b"), "unpack an NSIS installer");
+    }
+
+    private static void checkNsisBuilt(final @NotNull Path exe, final @NotNull String name, final byte @NotNull [] big) throws Exception {
+        final Path cut = Vfs.openEmbedded(Vfs.stat(exe), Progress.NONE);
+        check(cut != null, "NSIS " + name + " opens");
+        final VFile rootDir = Vfs.archiveDir(cut, "");
+        check(names(rootDir).equals(List.of("$SYSDIR", "big.bin", "s")), "NSIS " + name + " root: " + names(rootDir));
+        check(Arrays.equals(Vfs.readAll(Vfs.findChild(rootDir, "big.bin")), big), "NSIS " + name + " big.bin");
+        final VFile deep = Vfs.findChild(Vfs.archiveDir(cut, "s/deep"), "b.txt");
+        check(deep != null && "b".equals(new String(Vfs.readAll(deep), StandardCharsets.UTF_8)), "NSIS " + name + " File /r dirs");
+        final VFile a = Vfs.findChild(Vfs.archiveDir(cut, "s"), "a.txt");
+        check(a != null && a.getSize() == 10_000, "NSIS " + name + " size");
+        check(Vfs.findChild(Vfs.archiveDir(cut, "$SYSDIR"), "c.txt") != null, "NSIS " + name + " /oname outside $INSTDIR");
+        Vfs.releaseNested(cut);
     }
 
     /** The menu entry an AppImage writes for itself, and when it leaves the menu to another integration. */
@@ -820,7 +929,7 @@ public final class SmokeTest {
             check(ArchiveFormat.of(name) != null && Vfs.stat(tar).isArchiveFile(), "archive by extension " + name);
             check(new String(Vfs.readAll(Vfs.file(tar + "!/d/x.txt")), StandardCharsets.UTF_8).equals(text), "read entry " + name);
             final Path out = Files.createDirectories(root.resolve("untar-" + name));
-            exec(new UnpackJob(List.of(Vfs.stat(tar)), Vfs.resolve(out.toString()), "*"));
+            exec(new UnpackJob(List.of(Vfs.stat(tar)), Vfs.resolve(out.toString()), "*", false));
             check(Files.readString(out.resolve("d/x.txt")).equals(text) && Files.isDirectory(out.resolve("d/empty")), "unpack " + name);
             check(Vfs.file(tar + "!/d/x.txt").getAttrs().equals("rwxr-x---"), "tar attributes " + name);
             check(!POSIX || Files.getPosixFilePermissions(out.resolve("d/x.txt")).equals(PosixFilePermissions.fromString("rwxr-x---")),
@@ -846,7 +955,7 @@ public final class SmokeTest {
         check(names(Vfs.resolve(rar.toString())).equals(List.of("d")), "rar listing");
         check(Vfs.readAll(Vfs.file(rar + "!/d/x.txt")).length == 2400, "rar read compressed entry");
         final Path unrar = Files.createDirectories(root.resolve("unrar"));
-        exec(new UnpackJob(List.of(Vfs.stat(rar)), Vfs.resolve(unrar.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(rar)), Vfs.resolve(unrar.toString()), "*", false));
         check(Files.readString(unrar.resolve("d/x.txt")).equals("rar content\n".repeat(200)), "unpack rar");
         check(!Vfs.file(rar + "!/d/x.txt").getAttrs().isEmpty(), "rar attributes");
         final TestJob rarTest = new TestJob(List.of(Vfs.stat(rar)));
@@ -860,7 +969,7 @@ public final class SmokeTest {
             z.closeEntry();
         }
         final Path into = Files.createDirectories(root.resolve("x/y/into"));
-        exec(new UnpackJob(List.of(Vfs.stat(evil)), Vfs.resolve(into.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(evil)), Vfs.resolve(into.toString()), "*", false));
         check(Files.exists(into.resolve("evil.txt")) && !Files.exists(root.resolve("x/evil.txt")), "unpack strips ../ from entry names");
 
         // names without the UTF-8 flag: Russian DOS/Windows archives write them in CP866, Western ones in CP437
@@ -887,7 +996,7 @@ public final class SmokeTest {
         check(Vfs.file(zip + "!/unix.sh").getAttrs().equals("rw-r-----"), "zip unix attributes: " + Vfs.file(zip + "!/unix.sh").getAttrs());
         check(Vfs.file(zip + "!/dos.txt").getAttrs().equals("ra--"), "zip dos attributes: " + Vfs.file(zip + "!/dos.txt").getAttrs());
         final Path out = Files.createDirectories(root.resolve("attrs.out"));
-        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(out.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(out.toString()), "*", false));
         if (POSIX) {
             check(Files.getPosixFilePermissions(out.resolve("unix.sh")).equals(PosixFilePermissions.fromString("rw-r-----")),
                 "unpack keeps zip permissions");
@@ -1030,7 +1139,7 @@ public final class SmokeTest {
             z.closeEntry();
         }
         final Path into = Files.createDirectories(root.resolve(file + ".out"));
-        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(into.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(zip)), Vfs.resolve(into.toString()), "*", false));
         check(Files.exists(into.resolve(name)), "unpack " + charset + " names");
     }
 
@@ -1180,7 +1289,7 @@ public final class SmokeTest {
         }
         check(names(Vfs.resolve(sevenZip.toString())).equals(List.of("d")) && read(sevenZip + "!/d/x.txt").equals(FIXTURE), "7z read");
         final Path un7z = Files.createDirectories(root.resolve("un7z"));
-        exec(new UnpackJob(List.of(Vfs.stat(sevenZip)), Vfs.resolve(un7z.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(sevenZip)), Vfs.resolve(un7z.toString()), "*", false));
         check(Files.readString(un7z.resolve("d/x.txt")).equals(FIXTURE), "7z unpack");
         final TestJob test7z = new TestJob(List.of(Vfs.stat(sevenZip)));
         exec(test7z);
@@ -1195,7 +1304,7 @@ public final class SmokeTest {
         }
         check(Vfs.file(root.resolve("rr.iso") + "!/d/x.txt").getAttrs().equals("rwxr-xr-x"), "iso rock ridge mode");
         final Path unIso = Files.createDirectories(root.resolve("uniso"));
-        exec(new UnpackJob(List.of(Vfs.stat(root.resolve("rr.iso"))), Vfs.resolve(unIso.toString()), "*"));
+        exec(new UnpackJob(List.of(Vfs.stat(root.resolve("rr.iso"))), Vfs.resolve(unIso.toString()), "*", false));
         check(Files.readString(unIso.resolve("d/x.txt")).equals(FIXTURE) && Files.exists(unIso.resolve(LONG_NAME)), "iso unpack");
 
         final Path squash = Files.write(root.resolve("image.sfs"), Base64.getDecoder().decode(SQUASHFS));
@@ -1398,7 +1507,7 @@ public final class SmokeTest {
             final Path tar = Files.copy(root.resolve("t.tar." + ext), root.resolve("tar-" + ext + ".bin"));
             check(ArchiveFormat.detect(tar).isTar(), "tar." + ext + " signature");
             final Path unpacked = Files.createDirectories(root.resolve("un-" + ext));
-            exec(new UnpackJob(List.of(Vfs.stat(file)), Vfs.resolve(unpacked.toString()), "*"));
+            exec(new UnpackJob(List.of(Vfs.stat(file)), Vfs.resolve(unpacked.toString()), "*", false));
             check(Files.readString(unpacked.resolve("Report.TXT")).equals(FIXTURE), ext + " unpack");
             final byte[] bad = packed.toByteArray();
             bad[bad.length / 2] ^= 0x55;
@@ -1605,7 +1714,7 @@ public final class SmokeTest {
                 check(read(archive + "!/d/x.txt").equals(FIXTURE), "encrypted read " + a[0]);
                 check(prompts.size() == 2, "wrong password asked again " + a[0] + ": " + prompts);
                 final Path out = Files.createDirectories(root.resolve("un-" + a[0]));
-                exec(new UnpackJob(List.of(Vfs.stat(archive)), Vfs.resolve(out.toString()), "*"));
+                exec(new UnpackJob(List.of(Vfs.stat(archive)), Vfs.resolve(out.toString()), "*", false));
                 check(Files.readString(out.resolve("d/x.txt")).equals(FIXTURE) && Files.readString(out.resolve(LONG_NAME)).equals("hi\n"),
                     "encrypted unpack " + a[0]);
                 check(prompts.size() == 2, "password remembered " + a[0]);

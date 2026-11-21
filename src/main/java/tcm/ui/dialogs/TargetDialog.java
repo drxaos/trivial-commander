@@ -11,6 +11,7 @@ import java.util.List;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -25,17 +26,22 @@ import org.jetbrains.annotations.Nullable;
 import lombok.Getter;
 
 import tcm.util.Placement;
+import tcm.util.Settings;
 
 /**
- * Copy/move/unpack dialog: target path, "only files of type" mask, OK / F2 Queue / F10 Tree / Cancel.
+ * Copy/move/unpack dialog: target path, "only files of type" mask, (unpack) each archive into its own directory,
+ * OK / F2 Queue / F10 Tree / Cancel.
  * F5/F6 — toggle selection in the path, Ctrl+D — favorite directories, F8 — mask templates, Ctrl+Home — cursor before the name.
  */
 public final class TargetDialog extends JDialog {
 
+    private static final String OWN_DIRS_KEY = "unpack.ownDirs";
     private static final String[] MASKS = {"*", "*.txt", "*.java", "*.jpg;*.png;*.gif", "*.zip;*.jar", "*.html;*.htm;*.css;*.js"};
 
     private final JTextField target = new JTextField(52);
     private final JComboBox<String> mask = new JComboBox<>(MASKS);
+    /** Unpack only: each archive into a directory named after it; null in the other dialogs. */
+    private final @Nullable JCheckBox ownDirs;
     private final @NotNull List<String> hotlist;
     private @Nullable Result result;
 
@@ -45,11 +51,13 @@ public final class TargetDialog extends JDialog {
         private final @NotNull String target;
         private final @NotNull String mask;
         private final boolean queued;
+        private final boolean ownDirs;
 
-        public Result(final @NotNull String target, final @NotNull String mask, final boolean queued) {
+        public Result(final @NotNull String target, final @NotNull String mask, final boolean queued, final boolean ownDirs) {
             this.target = target;
             this.mask = mask;
             this.queued = queued;
+            this.ownDirs = ownDirs;
         }
     }
 
@@ -58,10 +66,12 @@ public final class TargetDialog extends JDialog {
         final @NotNull String title,
         final @NotNull String prompt,
         final @NotNull String path,
-        final @NotNull List<String> hotlist
+        final @NotNull List<String> hotlist,
+        final @Nullable String ownDirsLabel
     ) {
         super(owner, title, ModalityType.APPLICATION_MODAL);
         this.hotlist = hotlist;
+        ownDirs = ownDirsLabel == null ? null : new JCheckBox(ownDirsLabel, Settings.getBoolean(OWN_DIRS_KEY, false));
         final JPanel content = new JPanel(new GridBagLayout());
         content.setBorder(BorderFactory.createEmptyBorder(10, 10, 6, 10));
         final GridBagConstraints c = new GridBagConstraints();
@@ -78,6 +88,10 @@ public final class TargetDialog extends JDialog {
         c.insets = new Insets(2, 0, 2, 0);
         mask.setEditable(true);
         content.add(mask, c);
+        if (ownDirs != null) {
+            c.insets = new Insets(8, 0, 2, 0);
+            content.add(ownDirs, c);
+        }
         final JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         final JButton ok = Dialogs.button("OK", () -> close(false));
         buttons.add(ok);
@@ -99,7 +113,19 @@ public final class TargetDialog extends JDialog {
         final @NotNull String path,
         final @NotNull List<String> hotlist
     ) {
-        final TargetDialog dialog = new TargetDialog(owner, title, prompt, path, hotlist);
+        return show(owner, title, prompt, path, hotlist, null);
+    }
+
+    /** ownDirsLabel — text of the "into a directory named after the archive" checkbox (unpack), null — no checkbox. */
+    public static @Nullable Result show(
+        final @NotNull Window owner,
+        final @NotNull String title,
+        final @NotNull String prompt,
+        final @NotNull String path,
+        final @NotNull List<String> hotlist,
+        final @Nullable String ownDirsLabel
+    ) {
+        final TargetDialog dialog = new TargetDialog(owner, title, prompt, path, hotlist, ownDirsLabel);
         dialog.setVisible(true);
 
         return dialog.result;
@@ -148,7 +174,11 @@ public final class TargetDialog extends JDialog {
             return;
         }
         final Object m = mask.getEditor().getItem();
-        result = new Result(t, m == null || m.toString().isBlank() ? "*" : m.toString().trim(), queued);
+        final boolean own = ownDirs != null && ownDirs.isSelected();
+        if (ownDirs != null) {
+            Settings.putBoolean(OWN_DIRS_KEY, own);
+        }
+        result = new Result(t, m == null || m.toString().isBlank() ? "*" : m.toString().trim(), queued, own);
         dispose();
     }
 }

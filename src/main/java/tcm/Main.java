@@ -17,6 +17,7 @@ import com.formdev.flatlaf.FlatLightLaf;
 
 import tcm.core.AppImageDesktopEntry;
 import tcm.core.WindowsMenuEntry;
+import tcm.ui.TextUndo;
 import tcm.util.Settings;
 
 /**
@@ -41,6 +42,7 @@ public final class Main {
         WindowsMenuEntry.reconcileInBackground();
         SwingUtilities.invokeLater(() -> {
             applyTheme(Settings.get("theme", "Light"));
+            TextUndo.install();
             new MainFrame().setVisible(true);
         });
     }

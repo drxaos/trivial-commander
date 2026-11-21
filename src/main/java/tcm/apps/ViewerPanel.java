@@ -71,6 +71,7 @@ import tcm.ui.SvgImages;
 import tcm.util.Keys;
 import tcm.util.Placement;
 import tcm.util.TextUtil;
+import tcm.util.WheelZoom;
 
 /**
  * Viewer content: text, binary, hex, HTML without tags, images. Used both in the F3 window
@@ -84,6 +85,8 @@ public final class ViewerPanel extends JPanel {
     private static final int MAX_DUMP_BYTES = 4 * 1024 * 1024;
     private static final int BINARY_WIDTH = 80;
     private static final int FAST_WHEEL = 5;
+    /** Font size factor of one Ctrl+wheel step. */
+    private static final float WHEEL_ZOOM = 1.1f;
     /** Document property (AbstractDocument.I18NProperty is package-private): bidi/complex text views. */
     private static final String I18N_PROPERTY = "i18n";
     private static final int MAX_I18N_CHARS = 64 * 1024;
@@ -98,7 +101,7 @@ public final class ViewerPanel extends JPanel {
     private final ViewerText text = new ViewerText();
     /** Large text: measured and drawn without shaping (see PlainMetrics, UnshapedViews). */
     private boolean unshapedMetrics;
-    private final JScrollPane textScroll = new JScrollPane(text);
+    private final JScrollPane textScroll = WheelZoom.scrollPane(text, this::wheelZoom);
     private final LineNumbers lineNumbers = new LineNumbers(text);
     private final JEditorPane markdown = new JEditorPane() {
         @Override
@@ -107,7 +110,7 @@ public final class ViewerPanel extends JPanel {
             useEditableBackground(this);
         }
     };
-    private final JScrollPane markdownScroll = new JScrollPane(markdown);
+    private final JScrollPane markdownScroll = WheelZoom.scrollPane(markdown, this::wheelZoom);
     private final ImageView imageView = new ImageView(this::updateImageStatus);
     private final JLabel status = new JLabel(" ");
     private final TextFinder finder = new TextFinder();
@@ -180,6 +183,7 @@ public final class ViewerPanel extends JPanel {
         text.setEditable(false);
         text.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         fontSize = text.getFont().getSize2D();
+        WordDragCaret.installOn(text);
         text.getCaret().setVisible(false);
         final JPanel content = new JPanel(cards);
         textScroll.setRowHeaderView(lineNumbers);
@@ -969,6 +973,13 @@ public final class ViewerPanel extends JPanel {
         Keys.bindAncestor(this, "ctrl NUMPAD0", () -> zoom(0));
     }
 
+    /** Text to search with F3 without asking (the viewer opened from the file search that looked for this text). */
+    public void presetFind(final @NotNull String query, final boolean caseSensitive) {
+        finder.setQuery(query);
+        finder.setCaseSensitive(caseSensitive);
+        finder.setBackward(false);
+    }
+
     private void find(final boolean backward) {
         final String sel = shownText().getSelectedText();
         if (sel != null && !sel.isEmpty() && sel.length() < 100) {
@@ -1088,6 +1099,10 @@ public final class ViewerPanel extends JPanel {
         final JScrollBar bar = textScroll.getVerticalScrollBar();
         restoreScroll = bar.getMaximum() > 0 ? (float) bar.getValue() / bar.getMaximum() : 0;
         render();
+    }
+
+    private void wheelZoom(final int direction) {
+        zoom(direction > 0 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM);
     }
 
     private void zoom(final float factor) {

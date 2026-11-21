@@ -4,8 +4,11 @@ import java.awt.Component;
 
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
+import javax.swing.JSpinner;
+import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
 
 import org.jetbrains.annotations.NotNull;
@@ -52,6 +55,27 @@ public final class Dialogs {
     public static void caretBeforeName(final @NotNull JTextComponent field) {
         final String text = field.getText();
         field.setCaretPosition(Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\')) + 1);
+    }
+
+    /**
+     * Ticking the checkbox moves focus to the field it switches on (text is selected, ready to be typed over).
+     * invokeLater: a listener that enables the field may be added later and has to run first.
+     */
+    public static void focusOnCheck(final @NotNull JCheckBox box, final @NotNull JComponent field) {
+        box.addActionListener(e -> {
+            if (!box.isSelected()) {
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                final JComponent target = field instanceof JSpinner s && s.getEditor() instanceof JSpinner.DefaultEditor d
+                    ? d.getTextField()
+                    : field;
+                target.requestFocusInWindow();
+                if (target instanceof JTextComponent t) {
+                    t.selectAll();
+                }
+            });
+        });
     }
 
     public static @NotNull JButton button(final @NotNull String text, final @NotNull Runnable action) {

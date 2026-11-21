@@ -73,6 +73,12 @@ public final class ViewerWindow {
 
     public static void open(final @Nullable Window owner, final @NotNull List<VFile> files, final int index,
         final @Nullable Consumer<VFile> onEdit) {
+        open(owner, files, index, onEdit, null, false);
+    }
+
+    /** find — text for F3 (search next) without the Find dialog; null — no preset. */
+    public static void open(final @Nullable Window owner, final @NotNull List<VFile> files, final int index,
+        final @Nullable Consumer<VFile> onEdit, final @Nullable String find, final boolean caseSensitive) {
         if (files.isEmpty()) {
             return;
         }
@@ -81,12 +87,18 @@ public final class ViewerWindow {
         final boolean modalOwner = owner instanceof Dialog d && d.isModal();
         for (final ViewerWindow w : OPEN) {
             if (!modalOwner && w.files.get(w.index).equals(files.get(start))) {
+                if (find != null) {
+                    w.viewer.presetFind(find, caseSensitive);
+                }
                 AppWindows.bringToFront(w.window);
 
                 return;
             }
         }
-        new ViewerWindow(owner, files, start, onEdit);
+        final ViewerWindow w = new ViewerWindow(owner, files, start, onEdit);
+        if (find != null) {
+            w.viewer.presetFind(find, caseSensitive);
+        }
     }
 
     private void show() {

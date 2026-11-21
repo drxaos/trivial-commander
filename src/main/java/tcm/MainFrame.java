@@ -85,6 +85,7 @@ import tcm.ui.LayoutSwitchKeys;
 import tcm.ui.PanelHost;
 import tcm.ui.PanelTab;
 import tcm.ui.SystemIcons;
+import tcm.ui.dialogs.BackgroundDialog;
 import tcm.ui.dialogs.HelpDialog;
 import tcm.ui.dialogs.PasswordDialog;
 import tcm.ui.dialogs.TreeDialog;
@@ -1012,6 +1013,7 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         cmd.addSeparator();
         cmd.add(item("Command history", "alt F8", commandLine::showHistoryPopup));
         cmd.add(item("Refresh", "ctrl R", this::refreshPanels));
+        cmd.add(item("Background operations", null, this::showBackground));
 
         return cmd;
     }
@@ -1270,9 +1272,18 @@ public final class MainFrame extends JFrame implements PanelHost, CommandLine.Ho
         return result;
     }
 
+    private void showBackground() {
+        if (JobRunner.getBackgroundCount() == 0) {
+            JOptionPane.showMessageDialog(this, "No background operations.", "Background operations", JOptionPane.INFORMATION_MESSAGE);
+
+            return;
+        }
+        BackgroundDialog.open(this);
+    }
+
     private void exit() {
-        if (JobRunner.getQueuedCount() > 0) {
-            final int a = JOptionPane.showConfirmDialog(this, "There are queued operations. Exit anyway?", "Exit",
+        if (JobRunner.getBackgroundCount() > 0) {
+            final int a = JOptionPane.showConfirmDialog(this, "There are background operations. Exit anyway?", "Exit",
                 JOptionPane.YES_NO_OPTION);
             if (a != JOptionPane.YES_OPTION) {
                 return;

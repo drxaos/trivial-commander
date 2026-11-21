@@ -14,7 +14,9 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -117,8 +119,6 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     private @NotNull String quickFilter = "";
     private @NotNull String lastQuickFilter = "";
     private boolean active;
-    /** Whether the listing was read with hidden files: a tab in the background misses the switch (Ctrl+H). */
-    private boolean listedHidden;
 
     public PanelTab(final @NotNull FilePanel owner, final @NotNull VFile dir) {
         super(new BorderLayout());
@@ -175,7 +175,6 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
         if (parent != null) {
             visible.add(VFile.parentLink(parent));
         }
-        listedHidden = owner.getHost().isShowHidden();
         for (final VFile f : files) {
             if (isVisible(f)) {
                 visible.add(f);
@@ -796,11 +795,21 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             return false;
         }
         try {
+            final VFile existing = renameTarget(f, name);
+            if (existing != null && !confirmRenameOverwrite(f, existing)) {
+                return false;
+            }
             if (f.isInArchive()) {
-                ZipOps.rename(f.getHostPath(), f.getEntry(), ArchiveIndex.join(ArchiveIndex.parentOf(f.getEntry()), name));
+                final String to = ArchiveIndex.join(ArchiveIndex.parentOf(f.getEntry()), name);
+                ZipOps.rename(f.getHostPath(), f.getEntry(), to, existing != null);
                 navigate(Vfs.archiveDir(f.getHostPath(), dir.getEntry()), name, false);
             } else {
-                Vfs.rename(f.getHostPath(), f.getHostPath().resolveSibling(name));
+                final Path to = f.getHostPath().resolveSibling(name);
+                if (existing != null) {
+                    Files.move(f.getHostPath(), to, StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    Vfs.rename(f.getHostPath(), to);
+                }
                 navigate(dir, name, false);
             }
 
@@ -810,6 +819,32 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
 
             return false;
         }
+    }
+
+    /** The file the new name already belongs to; null — the name is free (or only its case changes on a case-insensitive FS). */
+    private static @Nullable VFile renameTarget(final @NotNull VFile f, final @NotNull String name) throws IOException {
+        if (f.isInArchive()) {
+            return Vfs.index(f.getHostPath()).get(ArchiveIndex.join(ArchiveIndex.parentOf(f.getEntry()), name));
+        }
+        final Path to = f.getHostPath().resolveSibling(name);
+        if (!Files.exists(to, LinkOption.NOFOLLOW_LINKS) || Vfs.isCaseOnlyRename(f.getHostPath(), to)) {
+            return null;
+        }
+
+        return Vfs.stat(to);
+    }
+
+    /** A file is replaced only by a file: a directory is not overwritten (and not merged) by a rename. */
+    private boolean confirmRenameOverwrite(final @NotNull VFile f, final @NotNull VFile existing) {
+        if (f.isDirectory() || existing.isDirectory()) {
+            showError("Cannot rename " + f.getName() + ":\n" + (existing.isDirectory() ? "a directory" : "a file") + " named "
+                + existing.getName() + " already exists.", null);
+
+            return false;
+        }
+
+        return JOptionPane.showConfirmDialog(SwingUtilities.getWindowAncestor(this), "File " + existing.getName()
+            + " already exists.\nOverwrite it?", "Rename", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
 
     // ---- selection ----
@@ -925,8 +960,8 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
     }
 
     /**
-     * The tab came to the front: the view settings of the window (brief, thumbnails, hidden files) may have changed while it was
-     * in the background, and only what differs is applied. Search results are a list of their own and stay as they are.
+     * The tab came to the front: the view settings of the window (brief, thumbnails, hidden files) and the directory itself may have
+     * changed while it was in the background. Search results are a list of their own and stay as they are.
      */
     public void syncView() {
         final PanelHost host = owner.getHost();
@@ -934,9 +969,9 @@ public final class PanelTab extends JPanel implements QuickBar.Listener {
             setThumbs(host.isThumbs());
         }
         setBrief(host.isBrief());
-        if (feed == null && listedHidden != host.isShowHidden()) {
-            refreshQuietly();
-        }
+        // a tab in the background is not watched for changes (DirWatcher follows the visible ones): re-read on coming forward;
+        // this also applies a hidden-files toggle made while the tab was in the background
+        refreshQuietly();
     }
 
     public void setThumbs(final boolean value) {

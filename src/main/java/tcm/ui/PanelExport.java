@@ -12,7 +12,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TooManyListenersException;
-import java.util.stream.Collectors;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -86,7 +85,11 @@ final class PanelExport extends DragGestureRecognizer {
         // no listeners
     }
 
-    /** File list: a Java list (goes out as text/uri-list on X11) and paths as a string. */
+    /**
+     * File list only: on X11 Java sends it as text/uri-list and FILE_NAME. No text flavor: any text flavor goes out as UTF8_STRING
+     * and text/plain too, and a receiver that takes text (Rocket.Chat, other Electron programs) pasted the paths instead of
+     * attaching the files. Terminals and editors turn a uri-list into paths or open the files themselves.
+     */
     private static final class FileList implements Transferable {
 
         private final @NotNull List<File> files;
@@ -97,23 +100,18 @@ final class PanelExport extends DragGestureRecognizer {
 
         @Override
         public DataFlavor[] getTransferDataFlavors() {
-            return new DataFlavor[] {DataFlavor.javaFileListFlavor, DataFlavor.stringFlavor};
+            return new DataFlavor[] {DataFlavor.javaFileListFlavor};
         }
 
         @Override
         public boolean isDataFlavorSupported(final DataFlavor flavor) {
-            return DataFlavor.javaFileListFlavor.equals(flavor) || DataFlavor.stringFlavor.equals(flavor);
+            return DataFlavor.javaFileListFlavor.equals(flavor);
         }
 
         @Override
         public @NotNull Object getTransferData(final DataFlavor flavor) throws UnsupportedFlavorException {
             if (DataFlavor.javaFileListFlavor.equals(flavor)) {
                 return files;
-            }
-            if (DataFlavor.stringFlavor.equals(flavor)) {
-                return files.stream()
-                    .map(File::getPath)
-                    .collect(Collectors.joining("\n"));
             }
             throw new UnsupportedFlavorException(flavor);
         }

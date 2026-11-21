@@ -96,7 +96,17 @@ public final class ZipOps {
     }
 
     public static void rename(final @NotNull Path archive, final @NotNull String from, final @NotNull String to) throws IOException {
-        apply(archive, new ZipEdit().rename(from, to), Progress.NONE);
+        rename(archive, from, to, false);
+    }
+
+    /** replace — the entry already named "to" is dropped; otherwise the rewrite would keep whichever of the two comes first. */
+    public static void rename(final @NotNull Path archive, final @NotNull String from, final @NotNull String to, final boolean replace)
+        throws IOException {
+        final ZipEdit edit = new ZipEdit().rename(from, to);
+        if (replace) {
+            edit.remove(to);
+        }
+        apply(archive, edit, Progress.NONE);
     }
 
     public static void mkdir(final @NotNull Path archive, final @NotNull String entry) throws IOException {

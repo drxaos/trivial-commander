@@ -47,6 +47,8 @@ public enum ArchiveFormat {
     MSI(false, ".msi", ".msm"),
     /** A Microsoft cabinet. */
     CAB(false, ".cab"),
+    /** A Nullsoft installer: found inside the .exe by its first header (see EmbeddedArchives), no extension of its own. */
+    NSIS(false),
     /** Single compressed files, not TAR (after the TAR formats: ".tar.gz" etc. are matched first). */
     GZ(false, ".gz"),
     BZ2(false, ".bz2"),
@@ -139,6 +141,9 @@ public enum ArchiveFormat {
         }
         if (CabFile.matches(head)) {
             return CAB;
+        }
+        if (NsisArchives.matches(head)) {
+            return NSIS;
         }
         if (startsWith(head, 'h', 's', 'q', 's')) {
             return SQUASHFS;

@@ -105,7 +105,7 @@ public final class HelpDialog {
         {"1 2 3 4 5 6 7 8 9", "Text / binary / hex / image / HTML / UTF-16 / UTF-8 / Markdown / JSON"},
         {"A / S / V", "Windows-1251 / DOS-866 / proportional font (other encodings — Options menu)"},
         {"W / F / L / C", "Wrap lines / fit all / fit large / center"},
-        {"Num + / Num - / Ctrl+0, mouse wheel", "Zoom / 1:1"},
+        {"Num + / Num - / Ctrl+0, Ctrl+wheel", "Font size (also in the editor) / default; image: zoom / 1:1, also the wheel"},
         {"Wheel with the wheel pressed", "Scroll text 5 times faster"},
         {"Image: ← / →", "Previous / next image in the directory"},
         {"H / Shift+H, R / Shift+R", "Flip horizontally / vertically, rotate clockwise / counterclockwise"},
@@ -130,11 +130,12 @@ public final class HelpDialog {
         {"Ctrl+U / F9 / Ctrl+Tab", "Swap files / two-line panel / other side"},
         {"←/→, Alt+←/→", "Scroll by 1 / 30 characters"},
         {"Dialogs", ""},
-        {"F2 (copying)", "To the queue"},
+        {"F2 (copying)", "To the queue (Commands → Background operations: pause, remove, cancel)"},
+        {"Ctrl+Z / Ctrl+Y, Ctrl+Shift+Z / Ctrl+A", "Undo / redo / select all in any text field (rename too)"},
         {"F5/F6, Shift+F5/F6, Alt+F5", "Toggle name selection"},
         {"F10 / Ctrl+D / F8 / Ctrl+Home", "Tree / favorites / mask templates / cursor before the name"},
         {"Overwrite: F3 / Shift+F3 / Ctrl+F3 / Ctrl+C", "View target / source / compare / copy details"},
-        {"Search: F3 / F4 / F2 / Alt+←→ / Ctrl+C / Ctrl+Tab", "View / edit / in results / lists / copy / pages"},
+        {"Search: F3 / F4 / F2 / Alt+←→ / Ctrl+C / Ctrl+Tab", "View (F3 there finds the searched text) / edit / in results / lists / copy / pages"},
         {"Multi-rename", "Shift+↑/↓ move, Del remove, Ctrl+F3..F6 sort, Enter execute"},
     };
 

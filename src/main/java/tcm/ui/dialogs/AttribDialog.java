@@ -146,6 +146,7 @@ public final class AttribDialog extends JDialog {
         date.setText(DATE.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(files.get(0).getModified()), ZoneId.systemDefault())));
         date.setEnabled(false);
         changeDate.addActionListener(e -> date.setEnabled(changeDate.isSelected()));
+        Dialogs.focusOnCheck(changeDate, date);
         row.add(changeDate);
         row.add(date);
         row.add(Dialogs.button("Now", () -> {

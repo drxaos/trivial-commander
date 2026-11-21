@@ -47,7 +47,7 @@ public final class ArchiveIndex {
     private final Map<String, VFile> entries = new HashMap<>();
     private final Map<String, List<VFile>> children = new HashMap<>();
     /**
-     * TAR, ISO, DMG, disk images, DEB, RPM, CHM, MSI, CAB: kept open for the index's whole lifetime — entries are read by offset
+     * TAR, ISO, DMG, disk images, DEB, RPM, CHM, MSI, CAB, NSIS: kept open for the index's whole lifetime — entries are read by offset
      * without re-parsing headers.
      */
     private @Nullable ArchiveReader tar;
@@ -100,6 +100,7 @@ public final class ArchiveIndex {
             case CHM -> ChmArchives.load(index);
             case MSI -> MsiArchives.load(index);
             case CAB -> CabArchives.load(index);
+            case NSIS -> NsisArchives.load(index);
             case GZ, BZ2, XZ -> CompressedFiles.load(index);
             default -> TarArchives.load(index);
         }

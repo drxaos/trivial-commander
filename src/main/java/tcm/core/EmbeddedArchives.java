@@ -23,10 +23,10 @@ import lombok.Getter;
 
 /**
  * Archives that start inside a file which is not an archive itself: self-extracting programs (a ZIP, RAR, 7z or cabinet after
- * the extractor code), makeself installers (.run/.sh: a shell script followed by a tar.gz, tar.bz2 or tar.xz), an MSI or a squashfs
- * image appended to a program. Only formats whose offsets are counted from their own start are searched; disk images, DMG, CHM,
- * RPM and .pak are not. A signature alone matches too often in program code, so each candidate is checked by its header checksum
- * or structure.
+ * the extractor code), Nullsoft (NSIS) installers, makeself installers (.run/.sh: a shell script followed by a tar.gz, tar.bz2
+ * or tar.xz), an MSI or a squashfs image appended to a program. Only formats whose offsets are counted from their own start are
+ * searched; disk images, DMG, CHM, RPM and .pak are not. A signature alone matches too often in program code, so each candidate
+ * is checked by its header checksum or structure.
  */
 public final class EmbeddedArchives {
 
@@ -41,6 +41,7 @@ public final class EmbeddedArchives {
     private static final int ISO_DESCRIPTOR = 0x8000;
     private static final int SEVEN_ZIP_HEADER = 32;
     private static final int CAB_HEADER = 36;
+    private static final int NSIS_ALIGN = 512;
     private static final int GZIP_PROBE = 4096;
     private static final int SQUASHFS_MIN_BLOCK_LOG = 12;
     private static final int SQUASHFS_MAX_BLOCK_LOG = 20;
@@ -94,6 +95,11 @@ public final class EmbeddedArchives {
             final int end = Math.min(n, SEARCH_LIMIT);
             boolean zipTried = false;
             for (int i = 0; i < end; i++) {
+                // the NSIS data follows the installer stub at a 512-byte boundary; its first header starts with free-form flags
+                if ((i & NSIS_ALIGN - 1) == 0 && NsisArchives.matches(le, i, n)) {
+                    result.add(new Found(ArchiveFormat.NSIS, i, Math.min(NsisArchives.length(le, i), size - i)));
+                    continue;
+                }
                 final Found found = switch (data[i]) {
                     case 'P' -> {
                         if (zipTried || !isZipLocalHeader(le, i, n)) {

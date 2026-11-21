@@ -87,7 +87,8 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   full path in the tooltip), the strip scrolls with the mouse wheel,
   history `Alt+←/→`, `Alt+↓`, favorite directories `Ctrl+D`, directory tree `Alt+F10`, swap panels `Ctrl+U`/`Ctrl+Shift+U`,
   the other panel's directory into the active one — `Ctrl+=` (Commands menu and a toolbar button).
-  A tab brought to the front picks up the view settings changed while it was in the background: brief/full, thumbnails, hidden files.
+  A tab brought to the front is re-read (only the visible tabs are watched for changes) and picks up the view settings changed
+  while it was in the background: brief/full, thumbnails, hidden files.
 - **Auto-refresh**: panels are re-read when focus returns to the window and at most once per second on changes
   in the local directories open in them (WatchService) — e.g. you can see a downloading file grow.
   Cursor, marks, scroll position and in-panel rename are not disturbed; search results are not re-read.
@@ -96,6 +97,12 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   symbolic links (`Ctrl+Shift+F5`), file clipboard (`Ctrl+C`/`Ctrl+X`/`Ctrl+V`, compatible with the system one).
   Operation queue (`F2 Queue` in the dialog), progress with Pause / Background / Cancel, conflicts Overwrite / All / Skip / Skip all
   (in the overwrite dialog `F3`/`Shift+F3` — view, `Ctrl+F3` — compare).
+  Queued operations and the ones sent to the background are listed in the **Background operations** window (also Commands menu):
+  progress of the running one, Pause / Resume of the whole queue, removing waiting operations (`Del`), cancelling the running one;
+  it closes by itself when the queue is empty and does not take the keyboard from the panels.
+  Renaming in place onto an existing file asks whether to overwrite it (a directory is never overwritten by a rename).
+  Unpacking (`Alt+F9`) can put each archive into a directory named after it (`a.tar.gz` → `a/`), the checkbox is remembered.
+  With no archive among the selected files by name, `Alt+F9` searches the files for one inside (an installer `.exe`, a `.run`).
 - **ZIP and JAR as directories**: enter with Enter, copy/move/delete/rename inside the archive (the archive is rewritten
   atomically), packing (`Alt+F5`, `Alt+Shift+F5` — with deletion), unpacking (`Alt+F9`/`Alt+F6`), CRC test (`Alt+Shift+F9`).
   Packing also creates TAR, TAR.GZ, TAR.BZ2 and TAR.XZ (packer buttons in the dialog or the extension of the name); such an archive
@@ -142,11 +149,16 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   `Ctrl+PgDn` opens any file as an archive: the format is detected by signature (`.docx`, `.apk`, `.cbr`...).
   `Enter`/double click on a file without an associated program does the same.
   A file that does not open as an archive is searched by `Ctrl+PgDn` for one starting in its first 10 MB: self-extracting programs
-  (ZIP, RAR, 7z, cabinet after the extractor code), makeself-style `.run`/`.sh` installers (a script followed by a TAR, tar.gz,
-  tar.bz2, tar.xz or a single .gz), and a squashfs, ISO, MSI or `.deb` appended to a program. Each signature found is checked
+  (ZIP, RAR, 7z, cabinet after the extractor code), Nullsoft (NSIS 2/3) installers, makeself-style `.run`/`.sh` installers
+  (a script followed by a TAR, tar.gz, tar.bz2, tar.xz or a single .gz), and a squashfs, ISO, MSI or `.deb` appended to a program. Each signature found is checked
   by its header checksum or structure, so the same bytes in program code are skipped. A ZIP is read in place; other formats are
   copied into a temporary file in the background, like a nested archive. Such an archive is read-only; the path is shown as
   `setup.exe!/dir`. Test samples: `ar/make-embedded.sh` → `ar/embedded/`.
+  NSIS: the files of the script's `File` commands, named as 7-Zip names them (`$INSTDIR` files at the root, `$PLUGINSDIR/...`,
+  `$TEMP/...`, `File /r` subdirectories); LZMA (with or without the x86 filter), deflate and NSIS's own bzip2, solid or per file,
+  Unicode or ANSI scripts. A solid installer is decoded once into a temporary file when opened. The uninstaller
+  (`WriteUninstaller`) is not listed: it is not stored as a file. SmokeTest builds test installers with `makensis` when it is
+  installed.
   Entry names with `..` are trimmed, so unpacking cannot escape the target directory.
 - **Encrypted archives**: ZIP (WinZip AES and the traditional ZipCrypto), RAR (encrypted files and encrypted headers)
   and 7z (encrypted contents and headers). The password is asked in a dialog when the archive is entered (encrypted headers)
@@ -160,6 +172,8 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   in the temporary directory than its own size, a warning asks to Continue or Cancel.
 - **Search** (`Alt+F7`): name mask or RegEx, text (substring/RegEx, case, "NOT containing"), depth, archives,
   size/date/type on the Advanced tab, search in results (`F2`), result history (`Alt+←/→`); "Feed to listbox", "Go to file".
+  Ticking "Find text" (or a size/date limit) puts the cursor into its field. A viewer opened from the results of a text search
+  finds that text with `F3` right away.
   Flat list of subdirectories — `Ctrl+B`.
 - **Viewer** (`F3`; on a directory `F3` enters it, as Enter does; a file already shown in a viewer brings that window forward): text (UTF-8/BOM, fallback ISO-8859-1; `A`/`S` — 1251/866), binary, hex, HTML;
   search `F7`/`F3`, switching between files `N`/`P`. `Ctrl+End` checks the file size first and re-reads a file that has changed
@@ -175,7 +189,9 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   images from the network are not loaded, http/https links open in the browser.
   JSON `9` is shown indented (pretty-print); parsing is lenient, so truncated or broken JSON is formatted too.
   `.json` files open in JSON mode right away, `.html`/`.htm` — in HTML mode `5`.
-  The mouse wheel rolled with the wheel pressed scrolls 5 times more lines.
+  The mouse wheel rolled with the wheel pressed scrolls 5 times more lines; `Ctrl+wheel` changes the font size.
+  A double click selects a word (in the editor too); a pixel of mouse movement before the button is released no longer drags the
+  selection on to the next line.
   Reading and converting the file (decoding, hex, markup) runs in the background: the main window does not wait, and a closed viewer
   (and editor) window cancels loading.
   Line numbers on the left; a click on a number selects the whole line, dragging — several lines, `Shift`+click extends the selection.
@@ -192,7 +208,9 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   - right-button press marks a file, right-button drag marks several files; holding the right button for 1 s — context menu
     (after 200 ms a small black-and-white ring next to the pointer fills up as the menu gets closer);
   - holding the right button on empty space — directory menu: New (Folder, File), Terminal, Explore (file manager), Properties;
-  - dragging files outside the window — into another program (copy; only files from disk, not from an archive);
+  - dragging files outside the window — into another program (copy; only files from disk, not from an archive). Only the file list
+    is offered (text/uri-list), not the paths as text, so chat programs attach the files instead of pasting their paths. Dragging
+    out of Engrampa (XDND direct save) is not supported;
   - clicking the `F8 Delete` button with `Shift` — delete bypassing the trash;
 - **Change attributes** (file context menu, Files menu): rwx permissions for owner/group/others (DOS attributes on Windows),
   modification date, processing directory contents. An untouched checkbox does not change the attribute; a gray one means the selected files have different values.
@@ -212,7 +230,8 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   Alt+Shift (Ctrl+Shift) shortcuts work even when the layout is switched with these keys (XKB `grp:alt_shift_toggle`):
   the modifier eaten by the switch is restored from the presses of the keys themselves (`LayoutSwitchKeys`).
 - **Editor** (`F4`, `Shift+F4` — new file, the name under the cursor is prefilled in the prompt): saving with `F2`/`Ctrl+S`
-  in the original encoding, including into an archive; undo, search, `Ctrl+G`. Line numbers as in the viewer;
+  in the original encoding, including into an archive; undo, search, `Ctrl+G`, font size `Ctrl+wheel` (`Ctrl+0` — default).
+  Line numbers as in the viewer;
   a file with too wide lines (see the viewer) is opened with word wrap. `End` on a line with trailing whitespace
   alternates between the end of the line and the end of its text. `F4` on a file that is already being edited brings that editor forward.
   Menus File (Save, Save as, Reload, Close) and Edit (Copy, Select all, Find, Find next).
@@ -222,4 +241,6 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   letters typed in the panel go to the line, the line is a history drop-down (arrow on the right, `Alt+F8`, `Ctrl+↓`), `Ctrl+E` — previous command,
   `Ctrl+Enter`/`Ctrl+P` — name/path into the line.
 - **Dialogs** open in the middle of the window they belong to (main window, viewer, editor), whole on its screen.
+- **Text fields** (dialogs, path, command line, in-panel rename): `Ctrl+Z` — undo, `Ctrl+Y`/`Ctrl+Shift+Z` — redo, `Ctrl+A` — select
+  all (`Cmd` on macOS). Text put in by the program before the field got focus (the name being renamed) is not undone.
 - **Themes** FlatLaf (Configuration): Light, Dark, IntelliJ, Darcula. Window, tab and history state is saved (`java.util.prefs`) on exit (and on `Cmd+Q` on macOS) and every 30 s.

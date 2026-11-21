@@ -1,5 +1,6 @@
 package tcm.util;
 
+import java.awt.FontMetrics;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
@@ -97,6 +98,24 @@ public final class TextUtil {
         }
 
         return controls * 10 > limit;
+    }
+
+    /** The text cut in the middle ("start…end") to fit width pixels; the whole text when it fits or width is not known yet. */
+    public static @NotNull String fitMiddle(final @NotNull String text, final @NotNull FontMetrics fm, final int width) {
+        if (width <= 0 || fm.stringWidth(text) <= width) {
+            return text;
+        }
+        int keep = text.length() - 1;
+        while (keep > 0) {
+            final int head = keep / 3;
+            final String s = text.substring(0, head) + "\u2026" + text.substring(text.length() - (keep - head));
+            if (fm.stringWidth(s) <= width) {
+                return s;
+            }
+            keep--;
+        }
+
+        return "\u2026";
     }
 
     public static @NotNull String groupDigits(final long value) {

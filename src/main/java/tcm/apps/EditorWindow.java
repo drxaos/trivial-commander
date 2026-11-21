@@ -48,6 +48,7 @@ import tcm.core.ZipEdit;
 import tcm.core.ZipOps;
 import tcm.util.Keys;
 import tcm.util.TextUtil;
+import tcm.util.WheelZoom;
 
 /**
  * Text editor (F4): saving with F2/Ctrl+S in the original encoding (with BOM if it was present), including back into an archive.
@@ -55,6 +56,9 @@ import tcm.util.TextUtil;
 public final class EditorWindow {
 
     private static final int TAB_SIZE = 4;
+    private static final float FONT_SIZE = 13f;
+    /** Font size factor of one Ctrl+wheel step. */
+    private static final float WHEEL_ZOOM = 1.1f;
     /** Open editors: F4 on a file that is already being edited brings its window forward instead of opening a second one. */
     private static final List<EditorWindow> OPEN = new ArrayList<>();
 
@@ -93,10 +97,11 @@ public final class EditorWindow {
         this.onSaved = onSaved;
         window = AppWindows.create(owner, file.getName());
         AppWindows.setFileIcon(window, false);
-        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
+        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, (int) FONT_SIZE));
         area.setEditable(false);
+        WordDragCaret.installOn(area);
         area.addCaretListener(e -> updateStatus());
-        final JScrollPane scroll = new JScrollPane(area);
+        final JScrollPane scroll = WheelZoom.scrollPane(area, d -> zoom(d > 0 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM));
         scroll.setRowHeaderView(new LineNumbers(area));
         AppWindows.container(window).getContentPane().add(scroll, BorderLayout.CENTER);
         status.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
@@ -203,6 +208,8 @@ public final class EditorWindow {
         Keys.bindWindow(root, "F3", () -> finder.findNext(area, false));
         Keys.bindWindow(root, "shift F3", () -> finder.findNext(area, true));
         Keys.bindWindow(root, "ctrl G", this::goToLine);
+        Keys.bindWindow(root, "ctrl 0", () -> zoom(0));
+        Keys.bindWindow(root, "ctrl NUMPAD0", () -> zoom(0));
         Keys.bind(area, JComponent.WHEN_FOCUSED, "ctrl Z", () -> {
             if (undo.canUndo()) {
                 undo.undo();
@@ -327,6 +334,12 @@ public final class EditorWindow {
         if (finder.ask(window, false)) {
             finder.findNext(area, false);
         }
+    }
+
+    /** factor 0 — the default size. */
+    private void zoom(final float factor) {
+        final float size = factor == 0 ? FONT_SIZE : Math.clamp(area.getFont().getSize2D() * factor, 6f, 72f);
+        area.setFont(area.getFont().deriveFont(size));
     }
 
     private void goToLine() {
