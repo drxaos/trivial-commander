@@ -24,11 +24,15 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import lombok.Getter;
+import tcm.core.Devices;
 import tcm.core.VFile;
 import tcm.core.Vfs;
 
@@ -41,10 +45,13 @@ public final class FilePanel extends JPanel {
     private static final String CARD_QUICK = "quick";
     /** Long paths do not bloat a tab: the title is truncated, the full path is in the tooltip. */
     private static final int MAX_TAB_WIDTH = 200;
+    /** How often mounted devices and drive letters are refreshed. */
+    private static final int DRIVES_REFRESH_MS = 30_000;
 
     @Getter
     private final @NotNull PanelHost host;
-    private final JComboBox<String> drives = new JComboBox<>();
+    private final JComboBox<String> drives = new DriveCombo();
+    private final Timer driveRefresh = new Timer(DRIVES_REFRESH_MS, e -> refreshDrives());
     private final JLabel freeSpace = new JLabel();
     private final JTabbedPane tabs = new JTabbedPane();
     private final CardLayout cards = new CardLayout();
@@ -69,6 +76,7 @@ public final class FilePanel extends JPanel {
         }
     };
     private boolean updatingDrives;
+    private @Nullable String driveLocation;
 
     public FilePanel(final @NotNull PanelHost host, final @NotNull List<String> locations, final int selected) {
         super(new BorderLayout());
@@ -101,6 +109,7 @@ public final class FilePanel extends JPanel {
             addTab(System.getProperty("user.home"), false, false);
         }
         tabs.setSelectedIndex(Math.max(0, Math.min(selected, tabs.getTabCount() - 1)));
+        driveRefresh.start();
     }
 
     public @NotNull PanelTab getCurrentTab() {
@@ -283,6 +292,7 @@ public final class FilePanel extends JPanel {
     }
 
     public void refresh() {
+        refreshDrives();
         getCurrentTab().refresh();
     }
 
@@ -323,18 +333,31 @@ public final class FilePanel extends JPanel {
             return;
         }
         freeSpace.setText(Vfs.freeSpaceText(tab.getDir()));
-        updateDriveSelection(tab.getDir());
+        if (!tab.getDir().getLocation().equals(driveLocation)) {
+            refreshDrives();
+        }
         host.panelChanged(this);
     }
 
     private @NotNull JPanel createDriveBar() {
         final JPanel bar = new JPanel(new BorderLayout(4, 0));
         bar.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
-        for (final File root : File.listRoots()) {
-            drives.addItem(root.getPath());
-        }
-        drives.addItem("~");
-        drives.setToolTipText("Drive / root (Alt+F1 / Alt+F2)");
+        refreshDrives();
+        drives.setToolTipText("Drive / root / mounted device (Alt+F1 / Alt+F2)");
+        drives.addPopupMenuListener(new PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(final PopupMenuEvent e) {
+                refreshDrives();
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(final PopupMenuEvent e) {
+            }
+
+            @Override
+            public void popupMenuCanceled(final PopupMenuEvent e) {
+            }
+        });
         drives.addActionListener(e -> {
             if (updatingDrives || drives.getSelectedItem() == null) {
                 return;
@@ -370,14 +393,59 @@ public final class FilePanel extends JPanel {
         return b;
     }
 
+    private void refreshDrives() {
+        final List<String> items = new ArrayList<>();
+        for (final File root : File.listRoots()) {
+            items.add(root.getPath());
+        }
+        items.add("~");
+        items.addAll(Devices.mountPoints());
+        final List<String> current = new ArrayList<>();
+        for (int i = 0; i < drives.getItemCount(); i++) {
+            current.add(drives.getItemAt(i));
+        }
+        if (!items.equals(current)) {
+            updatingDrives = true;
+            try {
+                drives.removeAllItems();
+                for (final String item : items) {
+                    drives.addItem(item);
+                }
+            } finally {
+                updatingDrives = false;
+            }
+        }
+        if (tabs.getTabCount() > 0) {
+            updateDriveSelection(getCurrentTab().getDir());
+        }
+    }
+
     private void updateDriveSelection(final @NotNull VFile dir) {
-        final Path rootPath = dir.getHostPath().getRoot();
+        driveLocation = dir.getLocation();
+        final Path path = dir.getHostPath();
+        final Path rootPath = path.getRoot();
         final String root = rootPath == null ? "/" : rootPath.toString();
+        String selection = root;
+        int depth = rootPath == null ? -1 : rootPath.getNameCount();
+        final Path home = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
+        if (path.startsWith(home)) {
+            selection = "~";
+            depth = home.getNameCount();
+        }
+        for (int i = 0; i < drives.getItemCount(); i++) {
+            final String item = drives.getItemAt(i);
+            if ("~".equals(item)) {
+                continue;
+            }
+            final Path candidate = Path.of(item);
+            if (path.startsWith(candidate) && candidate.getNameCount() > depth) {
+                selection = item;
+                depth = candidate.getNameCount();
+            }
+        }
         updatingDrives = true;
         try {
-            final String home = System.getProperty("user.home");
-            final String loc = dir.getLocation();
-            drives.setSelectedItem(loc.equals(home) || loc.startsWith(home + File.separator) ? "~" : root);
+            drives.setSelectedItem(selection);
         } finally {
             updatingDrives = false;
         }

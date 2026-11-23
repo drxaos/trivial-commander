@@ -60,6 +60,7 @@ import tcm.core.WindowsMenuEntry;
 import tcm.core.XdgApps;
 import tcm.core.XdgMime;
 import tcm.core.ArchiveFormat;
+import tcm.core.Devices;
 import tcm.core.DirWatcher;
 import tcm.core.EmbeddedArchives;
 import tcm.core.FileAttrs;
@@ -366,6 +367,8 @@ public final class SmokeTest {
         checkEncryptedArchives(root);
         checkArchiveAttributes(root);
         checkNestedArchives(root);
+        checkArchiveParentDrop(root);
+        checkDeviceMounts();
         checkEmbeddedArchives(root);
         checkWatcher(root);
         checkUtils();
@@ -378,6 +381,33 @@ public final class SmokeTest {
         checkRenameReplace(root);
         checkNsisInstaller();
         checkNsisMakensis(root);
+    }
+
+    /** Dropping the archive root's files onto ".." copies them into the directory containing the archive. */
+    private static void checkArchiveParentDrop(final @NotNull Path root) throws Exception {
+        final Path src = Files.createDirectories(root.resolve("parent-drop-src"));
+        Files.createDirectory(src.resolve("sub"));
+        Files.writeString(src.resolve("root.txt"), "root entry");
+        Files.writeString(src.resolve("sub/nested.txt"), "nested entry");
+        final Path container = Files.createDirectories(root.resolve("parent-drop"));
+        final Path archive = container.resolve("entries.zip");
+        exec(new PackJob(Vfs.list(Vfs.resolve(src.toString())), archive, true, false));
+
+        final VFile archiveRoot = Vfs.resolve(archive.toString());
+        final VFile parent = Vfs.parent(archiveRoot);
+        check(parent != null && parent.isLocal() && parent.getHostPath().equals(container), "archive root parent");
+        exec(new CopyJob(Vfs.list(archiveRoot), VFile.parentLink(parent), null, "*", false));
+        check(Files.readString(container.resolve("root.txt")).equals("root entry"), "drop on .. unpacks file");
+        check(Files.readString(container.resolve("sub/nested.txt")).equals("nested entry"), "drop on .. unpacks directory");
+        check(Vfs.findChild(archiveRoot, "root.txt") != null && Vfs.findChild(archiveRoot, "sub") != null,
+            "drop on .. keeps archive entries");
+    }
+
+    private static void checkDeviceMounts() {
+        final List<String> mounts = Devices.mountPoints();
+        check(mounts.stream().allMatch(m -> Path.of(m).isAbsolute()), "device mount points are absolute");
+        check(mounts.stream().distinct().count() == mounts.size(), "device mount points are unique");
+        check(mounts.stream().sorted().toList().equals(mounts), "device mount points are sorted");
     }
 
     /** Unpacking each archive into a directory named after it. */

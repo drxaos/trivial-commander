@@ -391,7 +391,8 @@ final class PanelMouse implements FileTable.MouseFilter {
             final int row = targetTab.getTable().rowAtPoint(tp);
             if (row >= 0) {
                 final VFile f = targetTab.getModel().getFile(row);
-                if (f.isDirectory() && !f.isParentLink() && !dragged.contains(f)) {
+                final boolean source = dragged.stream().anyMatch(d -> d.getLocation().equals(f.getLocation()));
+                if (f.isDirectory() && !source) {
                     return new DropSpot(targetTab, row, f);
                 }
             }

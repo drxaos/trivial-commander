@@ -135,7 +135,7 @@ final class PanelDrop implements DropTargetListener {
         }
         final VFile f = tab.getModel().getFile(row);
 
-        return f.isDirectory() && !f.isParentLink() ? row : -1;
+        return f.isDirectory() ? row : -1;
     }
 
     private static @NotNull List<Path> droppedPaths(final @NotNull Transferable t) throws UnsupportedFlavorException, IOException {

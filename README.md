@@ -220,12 +220,14 @@ commands in a login shell (`$SHELL -l -c`), so the `PATH` of the user's profile 
   Launch Services; on Windows the system "Open with" dialog. `Enter` or double click opens, typing jumps to a name, `Esc` cancels.
 - The **Terminal** toolbar button opens a terminal in the active panel's directory.
   - left-button drag to the other panel (or onto a directory) opens the copy dialog; the directory where the files will land
-    is outlined with a frame; while the right button is pressed during the drag — move, released — copy again;
+    is outlined with a frame; dropping files from an archive root onto `..` unpacks them into the directory containing the archive;
+    while the right button is pressed during the drag — move, released — copy again;
   - a marked file drags all marked ones along, an unmarked one — only itself;
   - files dropped from another program (file manager, desktop) — copy dialog into the directory under the mouse
     or into the panel's current directory (copy only);
   - double click on the panel divider puts it exactly in the middle; in a window up to 1200 px wide it always stays in the middle;
-  - the `\` `..` `~` buttons above the panel — root, up, home.
+  - the `\` `..` `~` buttons above the panel — root, up, home; the drive list also shows physical-device mount points
+    on Linux/macOS and all drive letters on Windows.
 - **Directory sizes**: `Space` on a directory, `Alt+Shift+Enter` — all directories of the current panel in turn (also a Files menu item).
   Alt+Shift (Ctrl+Shift) shortcuts work even when the layout is switched with these keys (XKB `grp:alt_shift_toggle`):
   the modifier eaten by the switch is restored from the presses of the keys themselves (`LayoutSwitchKeys`).
